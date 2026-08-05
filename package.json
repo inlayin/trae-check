@@ -1,0 +1,60 @@
+{
+  "name": "trae-check",
+  "version": "1.0.0",
+  "description": "Trae Work 每日自动签到工具 - 支持多账号",
+  "main": "dist-electron/main.js",
+  "author": "trae-check",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build && electron-builder",
+    "build:dir": "vue-tsc --noEmit && vite build && electron-builder --dir",
+    "preview": "vite preview",
+    "electron:dev": "vite --mode electron",
+    "electron:build": "vite build && electron-builder"
+  },
+  "dependencies": {
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "electron-store": "^8.2.0",
+    "node-cron": "^3.0.3",
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.6",
+    "vite-plugin-electron": "^0.28.4",
+    "vite-plugin-electron-renderer": "^0.14.5",
+    "vue-tsc": "^2.0.6",
+    "electron": "^29.1.4",
+    "electron-builder": "^24.13.3",
+    "@types/node": "^20.11.30",
+    "@types/node-cron": "^3.0.11"
+  },
+  "build": {
+    "appId": "com.traecheck.app",
+    "productName": "TraeCheck",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist",
+      "dist-electron",
+      "electron/trae-auth.cjs",
+      "electron/desktop-credentials.cjs"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
