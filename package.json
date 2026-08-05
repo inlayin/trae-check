@@ -41,10 +41,12 @@
     "files": [
       "dist",
       "dist-electron",
+      "assets",
       "electron/trae-auth.cjs",
       "electron/desktop-credentials.cjs"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         {
           "target": "nsis",

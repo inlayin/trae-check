@@ -10,6 +10,7 @@ let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+    icon: path.join(__dirname, '../assets/icon.png'),
     width: 1100,
     height: 750,
     minWidth: 900,
