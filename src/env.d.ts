@@ -31,5 +31,16 @@ interface Window {
     stopScheduler: () => Promise<boolean>
     getCookieFromLoginWindow: () => Promise<any>
     notifyLoginComplete: () => void
+    updater: {
+      check: () => Promise<void>
+      download: () => Promise<void>
+      cancel: () => Promise<boolean>
+      install: () => Promise<boolean>
+      onAvailable: (listener: (info: { version: string; releaseNotes: string; releaseDate: string }) => void) => () => void
+      onNotAvailable: (listener: () => void) => () => void
+      onProgress: (listener: (progress: { percent: number; transferred: number; total: number }) => void) => () => void
+      onDownloaded: (listener: () => void) => () => void
+      onError: (listener: (message: string) => void) => () => void
+    }
   }
 }

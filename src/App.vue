@@ -91,7 +91,7 @@
       <div class="content-area">
         <AccountList v-if="activeTab === 'accounts'" @add-account="showAddModal = true" @notify="showToast" />
         <CheckinLog v-else-if="activeTab === 'logs'" />
-        <SettingsPanel v-else />
+        <SettingsPanel v-else @check-update="checkForUpdates(true)" />
       </div>
     </main>
 
@@ -100,12 +100,15 @@
       v-model:visible="showAddModal"
       @success="handleAddSuccess"
     />
+
+    <!-- 更新弹窗 -->
+    <UpdateModal v-model:visible="showUpdateModal" :info="updateInfo" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from './stores/app'
 import AccountList from './components/AccountList.vue'
 import CheckinLog from './components/CheckinLog.vue'
@@ -116,6 +119,19 @@ import AppTitleBar from './components/AppTitleBar.vue'
 const store = useAppStore()
 const activeTab = ref<'accounts' | 'logs' | 'settings'>('accounts')
 const showAddModal = ref(false)
+const showUpdateModal = ref(false)
+const updateInfo = ref<{ version: string; releaseNotes: string; releaseDate: string } | null>(null)
+const manualCheck = ref(false)
+
+let unsubAvailable: (() => void) | undefined
+let unsubNotAvailable: (() => void) | undefined
+let unsubError: (() => void) | undefined
+let unsubDownloaded: (() => void) | undefined
+
+function checkForUpdates(manual: boolean) {
+  manualCheck.value = manual
+  void window.electronAPI.updater.check()
+}
 
 interface ToastItem {
   id: number
@@ -157,6 +173,36 @@ function handleAddSuccess() {
 
 onMounted(() => {
   store.init()
+
+  // 在线更新事件监听
+  unsubAvailable = window.electronAPI.updater.onAvailable((info) => {
+    updateInfo.value = info
+    showUpdateModal.value = true
+  })
+  unsubNotAvailable = window.electronAPI.updater.onNotAvailable(() => {
+    if (manualCheck.value) {
+      showToast('当前已是最新版本', 'success')
+      manualCheck.value = false
+    }
+  })
+  unsubError = window.electronAPI.updater.onError((message) => {
+    if (manualCheck.value) {
+      showToast('检查更新失败：' + message, 'error')
+      manualCheck.value = false
+    }
+  })
+  unsubDownloaded = window.electronAPI.updater.onDownloaded(() => {
+    if (!showUpdateModal.value) {
+      showToast('更新已就绪，下次退出时自动安装', 'success')
+    }
+  })
+})
+
+onUnmounted(() => {
+  unsubAvailable?.()
+  unsubNotAvailable?.()
+  unsubError?.()
+  unsubDownloaded?.()
 })
 </script>
 

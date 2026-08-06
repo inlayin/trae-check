@@ -38,5 +38,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 认证相关
   getCookieFromLoginWindow: () => ipcRenderer.invoke('auth:get-cookie-from-window'),
-  notifyLoginComplete: () => ipcRenderer.send('auth:login-complete')
+  notifyLoginComplete: () => ipcRenderer.send('auth:login-complete'),
+
+  // 在线更新
+  updater: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    cancel: () => ipcRenderer.invoke('update:cancel'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onAvailable: (listener: (info: { version: string; releaseNotes: string; releaseDate: string }) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, info: any) => listener(info)
+      ipcRenderer.on('update:available', subscription)
+      return () => ipcRenderer.removeListener('update:available', subscription)
+    },
+    onNotAvailable: (listener: () => void) => {
+      const subscription = () => listener()
+      ipcRenderer.on('update:not-available', subscription)
+      return () => ipcRenderer.removeListener('update:not-available', subscription)
+    },
+    onProgress: (listener: (progress: { percent: number; transferred: number; total: number }) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, progress: any) => listener(progress)
+      ipcRenderer.on('update:progress', subscription)
+      return () => ipcRenderer.removeListener('update:progress', subscription)
+    },
+    onDownloaded: (listener: () => void) => {
+      const subscription = () => listener()
+      ipcRenderer.on('update:downloaded', subscription)
+      return () => ipcRenderer.removeListener('update:downloaded', subscription)
+    },
+    onError: (listener: (message: string) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, data: any) => listener(data?.message || '')
+      ipcRenderer.on('update:error', subscription)
+      return () => ipcRenderer.removeListener('update:error', subscription)
+    }
+  }
 })

@@ -4,6 +4,7 @@ import { initStore } from './store'
 import { registerIpcHandlers } from './ipc'
 import { startScheduler } from './scheduler'
 import { createWindowLifecycle } from './window-lifecycle.cjs'
+import { initAutoUpdater } from './updater'
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -70,6 +71,9 @@ app.whenReady().then(() => {
   // 创建主窗口
   createWindow()
   createTray()
+
+  // 初始化在线更新（仅打包后自动检查）
+  if (mainWindow) initAutoUpdater(mainWindow)
 
   // 启动定时任务
   startScheduler()

@@ -239,6 +239,10 @@
         </div>
       </div>
 
+      <button class="btn btn-outline check-update-btn" @click="emit('check-update')">
+        检查更新
+      </button>
+
       <div class="tip-box">
         <div class="tip-icon">💡</div>
         <div class="tip-content">
@@ -259,6 +263,7 @@ import { computed } from 'vue'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
+const emit = defineEmits(['check-update'])
 
 const nextRunText = computed(() => {
   if (!store.settings?.autoCheckin) return '未启用'
@@ -614,6 +619,10 @@ function formatJson(obj?: Record<string, any>): string {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.check-update-btn {
+  margin-top: 16px;
 }
 
 /* 提示框 */
