@@ -15,7 +15,7 @@ import { performCheckin, performAllCheckin, getTotalPointsByTraeDesktop } from '
 import { startScheduler, stopScheduler, restartScheduler, getNextRunTime } from './scheduler'
 import type { Account, AppSettings } from './types'
 const { getTraeDesktopCredentials } = require('../electron/trae-auth.cjs') as { getTraeDesktopCredentials: () => any }
-const { encryptCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as { encryptCredential: (credential: any, storage: typeof safeStorage) => string; publicCredentialStatus: (credential: any) => { type: string; credentialStatus: string } }
+const { encryptCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as { encryptCredential: (credential: any, storage: typeof safeStorage) => string; publicCredentialStatus: (credential: any) => { type: string; credentialStatus: Account['credentialStatus'] } }
 
 function toPublicAccount(account: Account) {
   const { encryptedCredential, ...publicAccount } = account
@@ -153,8 +153,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
 
   // 打开登录窗口（用于获取 cookie）
   ipcMain.handle('auth:open-login-window', async () => {
-    const { BrowserWindow } = require('electron')
-
     const loginWin = new BrowserWindow({
       width: 1000,
       height: 700,
@@ -194,8 +192,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
 
   // 从登录窗口获取 cookie
   ipcMain.handle('auth:get-cookie-from-window', async () => {
-    const { BrowserWindow } = require('electron')
-
     return new Promise((resolve) => {
       const loginWin = new BrowserWindow({
         width: 1000,

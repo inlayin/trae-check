@@ -146,7 +146,7 @@
           <input
             type="text"
             class="input"
-            :value="store.settings.apiConfig?.checkinUrl || ''"
+            :value="store.settings?.apiConfig?.checkinUrl || ''"
             @input="updateApiConfig('checkinUrl', ($event.target as HTMLInputElement).value)"
             placeholder="https://api.example.com/checkin"
           />
@@ -156,7 +156,7 @@
           <label class="form-label">请求方法</label>
           <select
             class="input select-input"
-            :value="store.settings.apiConfig?.method || 'POST'"
+            :value="store.settings?.apiConfig?.method || 'POST'"
             @change="updateApiConfig('method', ($event.target as HTMLSelectElement).value)"
           >
             <option value="GET">GET</option>
@@ -169,7 +169,7 @@
           <textarea
             class="input textarea"
             rows="4"
-            :value="formatJson(store.settings.apiConfig?.headers)"
+            :value="formatJson(store.settings?.apiConfig?.headers)"
             @change="updateApiHeaders"
             placeholder='{"Authorization": "Bearer xxx"}'
           ></textarea>
@@ -181,7 +181,7 @@
           <textarea
             class="input textarea"
             rows="3"
-            :value="formatJson(store.settings.apiConfig?.body)"
+            :value="formatJson(store.settings?.apiConfig?.body)"
             @change="updateApiBody"
             placeholder='{"type": "daily"}'
           ></textarea>

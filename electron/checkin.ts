@@ -293,9 +293,6 @@ export async function checkinByWebview(account: Account): Promise<{ success: boo
 
     function cleanup() {
       clearTimeout(timeout)
-      try {
-        view.webContents.destroy()
-      } catch (e) {}
     }
 
     // 页面加载完成后执行签到逻辑
