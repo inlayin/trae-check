@@ -18,25 +18,25 @@
 ### 环境要求
 
 - Node.js >= 16.0.0
-- npm 或 yarn
+- pnpm
 
 ### 安装依赖
 
 ```bash
 cd E:\project\personal\trae-check
-npm install
+pnpm install
 ```
 
 ### 开发模式运行
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 ### 构建生产版本
 
 ```bash
-npm run build
+pnpm build
 ```
 
 构建产物将输出到 `release` 目录。
