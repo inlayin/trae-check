@@ -16,3 +16,7 @@ test('custom titlebar provides branded draggable area and accessible window cont
   assert.match(source, /aria-label="关闭"/)
   assert.match(source, /-webkit-app-region:\s*no-drag/)
 })
+
+test('main-process build emits the window controls module required at runtime', () => {
+  assert.ok(fs.existsSync(path.join(__dirname, '../dist-electron/window-controls.cjs')))
+})

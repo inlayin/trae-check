@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
+import { copyFileSync } from 'fs'
 import { resolve } from 'path'
 
 export default defineConfig({
@@ -42,6 +43,17 @@ export default defineConfig({
           options.reload()
         },
         vite: {
+          plugins: [
+            {
+              name: 'copy-window-controls-runtime',
+              closeBundle() {
+                copyFileSync(
+                  resolve(__dirname, 'electron/window-controls.cjs'),
+                  resolve(__dirname, 'dist-electron/window-controls.cjs')
+                )
+              }
+            }
+          ],
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
