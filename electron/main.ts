@@ -26,7 +26,7 @@ function createWindow() {
       contextIsolation: true,
       webviewTag: true
     },
-    frame: true,
+    frame: false,
     backgroundColor: '#f5f5f5'
   })
 

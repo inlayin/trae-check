@@ -8,6 +8,13 @@ declare module '*.vue' {
 
 interface Window {
   electronAPI: {
+    windowControls: {
+      minimize: () => Promise<void>
+      toggleMaximize: () => Promise<void>
+      close: () => Promise<void>
+      isMaximized: () => Promise<boolean>
+      onMaximizedChanged: (listener: (isMaximized: boolean) => void) => () => void
+    }
     getAccounts: () => Promise<any[]>
     importDesktopAccount: () => Promise<any>
     addAccount: (name: string, cookie: string) => Promise<any>

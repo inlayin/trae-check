@@ -16,6 +16,7 @@ import { startScheduler, stopScheduler, restartScheduler, getNextRunTime } from 
 import type { Account, AppSettings } from './types'
 const { getTraeDesktopCredentials } = require('../electron/trae-auth.cjs') as { getTraeDesktopCredentials: () => any }
 const { encryptCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as { encryptCredential: (credential: any, storage: typeof safeStorage) => string; publicCredentialStatus: (credential: any) => { type: string; credentialStatus: Account['credentialStatus'] } }
+const { registerWindowControls } = require('./window-controls.cjs') as { registerWindowControls: (ipc: typeof ipcMain, getWindow: () => BrowserWindow | null) => void }
 
 function toPublicAccount(account: Account) {
   const { encryptedCredential, ...publicAccount } = account
@@ -28,6 +29,8 @@ function generateId(): string {
 }
 
 export function registerIpcHandlers(mainWindow: BrowserWindow) {
+  registerWindowControls(ipcMain, () => mainWindow)
+
   // ========== 账号相关 ==========
 
   // 获取所有账号

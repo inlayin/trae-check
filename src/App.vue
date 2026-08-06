@@ -1,5 +1,7 @@
 <template>
-  <div class="app-container">
+  <div class="app-shell">
+    <AppTitleBar />
+    <div class="app-container">
     <!-- 侧边栏 -->
     <aside class="sidebar">
       <div class="sidebar-header">
@@ -104,6 +106,7 @@
       v-model:visible="showAddModal"
       @success="handleAddSuccess"
     />
+    </div>
   </div>
 </template>
 
@@ -114,19 +117,27 @@ import AccountList from './components/AccountList.vue'
 import CheckinLog from './components/CheckinLog.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AddAccountModal from './components/AddAccountModal.vue'
+import AppTitleBar from './components/AppTitleBar.vue'
 
 const store = useAppStore()
 const activeTab = ref<'accounts' | 'logs' | 'settings'>('accounts')
 const showAddModal = ref(false)
-const toastMessage = ref('')
-const toastType = ref<'success' | 'error'>('success')
-let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+interface ToastItem {
+  id: number
+  message: string
+  type: 'success' | 'error'
+}
+const toasts = ref<ToastItem[]>([])
+let toastIdSeed = 0
 
 function showToast(message: string, type: 'success' | 'error' = 'success') {
-  toastMessage.value = message
-  toastType.value = type
-  if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastMessage.value = '' }, 3500)
+  const id = ++toastIdSeed
+  toasts.value.push({ id, message, type })
+  setTimeout(() => {
+    const idx = toasts.value.findIndex(t => t.id === id)
+    if (idx !== -1) toasts.value.splice(idx, 1)
+  }, 3500)
 }
 
 const currentPageTitle = computed(() => {
@@ -156,19 +167,35 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.app-container {
+.app-shell {
   display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100vh;
   overflow: hidden;
 }
 
-.top-toast {
+.app-container {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  overflow: hidden;
+}
+
+.top-toast-container {
   position: fixed;
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.top-toast {
   padding: 12px 22px;
   border-radius: 10px;
   color: white;

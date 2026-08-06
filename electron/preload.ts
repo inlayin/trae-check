@@ -2,6 +2,17 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // 暴露给渲染进程的 API
 contextBridge.exposeInMainWorld('electronAPI', {
+  windowControls: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+    onMaximizedChanged: (listener: (isMaximized: boolean) => void) => {
+      const subscription = (_event: Electron.IpcRendererEvent, isMaximized: boolean) => listener(isMaximized)
+      ipcRenderer.on('window:maximized-changed', subscription)
+      return () => ipcRenderer.removeListener('window:maximized-changed', subscription)
+    }
+  },
   // 账号相关
   getAccounts: () => ipcRenderer.invoke('accounts:get-all'),
   importDesktopAccount: () => ipcRenderer.invoke('accounts:import-desktop'),

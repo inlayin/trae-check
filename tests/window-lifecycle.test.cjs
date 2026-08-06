@@ -62,3 +62,9 @@ test('main process wires lifecycle handling and a persistent tray menu', () => {
   assert.match(source, /label: 'Exit'/)
   assert.match(source, /mainWindow\.on\('close', lifecycle\.handleClose\)/)
 })
+
+test('main window uses a Vue-drawn titlebar rather than the native frame', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../electron/main.ts'), 'utf8')
+
+  assert.match(source, /frame:\s*false/)
+})
