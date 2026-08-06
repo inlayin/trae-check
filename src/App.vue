@@ -4,14 +4,6 @@
     <div class="app-container">
     <!-- 侧边栏 -->
     <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <span class="logo-icon">✓</span>
-          <span class="logo-text">TraeCheck</span>
-        </div>
-        <p class="logo-desc">每日自动签到工具</p>
-      </div>
-
       <nav class="nav-menu">
         <div
           class="nav-item"
@@ -213,41 +205,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   color: white;
-}
-
-.sidebar-header {
-  padding: 24px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  background: var(--primary-color);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  font-size: 18px;
-}
-
-.logo-text {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.logo-desc {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  margin-left: 42px;
 }
 
 .nav-menu {

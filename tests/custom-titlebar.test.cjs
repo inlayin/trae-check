@@ -17,6 +17,14 @@ test('custom titlebar provides branded draggable area and accessible window cont
   assert.match(source, /-webkit-app-region:\s*no-drag/)
 })
 
+test('sidebar does not duplicate the titlebar branding', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/App.vue'), 'utf8')
+
+  assert.doesNotMatch(source, /class="sidebar-header"/)
+  assert.doesNotMatch(source, /class="logo-text"/)
+  assert.doesNotMatch(source, /class="logo-desc"/)
+})
+
 test('main-process build emits the window controls module required at runtime', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '../dist-electron/window-controls.cjs')))
 })
