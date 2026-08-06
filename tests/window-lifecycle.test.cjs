@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const test = require('node:test')
 
 const { createWindowLifecycle } = require('../electron/window-lifecycle.cjs')
@@ -45,4 +47,18 @@ test('exit quits and allows subsequent close without preventing it', () => {
   lifecycle.handleClose(event)
 
   assert.deepEqual(calls, ['quit'])
+})
+
+test('main process wires lifecycle handling and a persistent tray menu', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../electron/main.ts'), 'utf8')
+
+  assert.match(source, /Menu, Tray/)
+  assert.match(source, /createWindowLifecycle/)
+  assert.match(source, /let tray: Tray \| null = null/)
+  assert.match(source, /Menu\.setApplicationMenu\(null\)/)
+  assert.match(source, /new Tray\(path\.join\(__dirname, '\.\.\/assets\/icon\.png'\)\)/)
+  assert.match(source, /tray\.setToolTip\('TraeCheck'\)/)
+  assert.ok(source.includes(String.raw`label: '\u663e\u793a TraeCheck'`))
+  assert.ok(source.includes(String.raw`label: '\u9000\u51fa'`))
+  assert.match(source, /mainWindow\.on\('close', lifecycle\.handleClose\)/)
 })

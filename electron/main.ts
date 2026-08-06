@@ -1,12 +1,16 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, Tray } from 'electron'
 import path from 'path'
 import { initStore } from './store'
 import { registerIpcHandlers } from './ipc'
 import { startScheduler } from './scheduler'
+import { createWindowLifecycle } from './window-lifecycle.cjs'
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+
+const lifecycle = createWindowLifecycle(() => mainWindow, () => app.quit())
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -42,33 +46,41 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null
   })
+
+  mainWindow.on('close', lifecycle.handleClose)
+}
+
+function createTray() {
+  tray = new Tray(path.join(__dirname, '../assets/icon.png'))
+  tray.setToolTip('TraeCheck')
+  tray.on('click', lifecycle.showWindow)
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '\u663e\u793a TraeCheck', click: lifecycle.showWindow },
+    { type: 'separator' },
+    { label: '\u9000\u51fa', click: lifecycle.exit }
+  ]))
 }
 
 // 应用就绪
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null)
   // 初始化数据存储
   initStore()
 
   // 创建主窗口
   createWindow()
+  createTray()
 
   // 启动定时任务
   startScheduler()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
+    if (mainWindow) lifecycle.showWindow()
+    else createWindow()
   })
 })
 
 // 所有窗口关闭时退出
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
-
 // 禁止创建新窗口的导航
 app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
