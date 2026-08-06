@@ -61,7 +61,9 @@
     </aside>
 
     <!-- 主内容区 -->
-    <div v-if="toastMessage" class="top-toast" :class="toastType">{{ toastMessage }}</div>
+    <div class="top-toast-container">
+      <div v-for="toast in toasts" :key="toast.id" class="top-toast" :class="toast.type">{{ toast.message }}</div>
+    </div>
 
     <main class="main-content">
       <!-- 顶部栏 -->
