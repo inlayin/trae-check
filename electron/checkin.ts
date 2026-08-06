@@ -10,7 +10,6 @@ const { decryptCredential, encryptCredential, refreshCredential, publicCredentia
   publicCredentialStatus: (value: any) => { credentialStatus: 'valid' | 'expiring' | 'expired' }
 }
 
-const TRAE_CHECKIN_STATUS_PATH = '/trae/api/v2/ug/checkin_credits/status'
 const TRAE_CHECKIN_CLAIM_PATH = '/trae/api/v2/ug/checkin_credits/claim'
 const TRAE_CREDITS_BALANCE_PATHS = [
   '/trae/api/v2/pay/user_current_entitlement_list',
@@ -53,15 +52,11 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
       'Authorization': `Cloud-IDE-JWT ${token}`,
       'x-device-id': deviceId
     }
-    const status = await axios.post(`${host}${TRAE_CHECKIN_STATUS_PATH}`, {}, { headers, timeout: 30000 })
 
-    if (status.data?.checked_in === true) {
-      return { success: true, message: '今日已签到' }
-    }
-    if (!apiSucceeded(status.data)) {
-      return { success: false, message: status.data?.message || '无法获取 TRAE 签到状态' }
-    }
-
+    // 直接调用领取接口，跳过 status 预检。
+    // status 接口会基于 x-device-id 判断设备级签到状态，多账号共享同一 deviceId 时
+    // 会导致账号 A 签到后账号 B 被误判为"已签到"。claim 接口靠 JWT 识别用户身份，
+    // 与 TRAE 桌面客户端手动签到一致，不会被 deviceId 误判。
     const claim = await axios.post(`${host}${TRAE_CHECKIN_CLAIM_PATH}`, {}, { headers, timeout: 30000 })
     if (apiSucceeded(claim.data)) {
       return {
@@ -70,7 +65,28 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
         points: claim.data?.data?.points || claim.data?.points || 200
       }
     }
-    return { success: false, message: claim.data?.message || claim.data?.msg || '签到失败' }
+
+    // 领取接口返回失败时，判断是否属于"今日已签到"。
+    // 注意：TRAE 的措辞可能是"已签到""已经签到""明日再来""今日已完成"等，
+    // "已经签到"不含子串"已签到"（中间有"经"字），需要分别匹配。
+    const claimMsg = claim.data?.message || claim.data?.msg || ''
+    const lowerMsg = claimMsg.toLowerCase()
+    const alreadyChecked =
+      claim.data?.code === 1001 ||
+      claimMsg.includes('已签到') ||
+      claimMsg.includes('已经签到') ||
+      claimMsg.includes('明日再来') ||
+      claimMsg.includes('今日已完成') ||
+      claimMsg.includes('已领取') ||
+      lowerMsg.includes('already') ||
+      lowerMsg.includes('checked') ||
+      lowerMsg.includes('repeat') ||
+      lowerMsg.includes('claimed')
+    if (alreadyChecked) {
+      return { success: true, message: '今日已签到' }
+    }
+
+    return { success: false, message: claimMsg || '签到失败' }
   } catch (err: any) {
     return { success: false, message: 'TRAE 桌面端签到失败: ' + (err.response?.data?.message || err.message || err) }
   }
@@ -529,12 +545,11 @@ export async function performCheckin(account: Account): Promise<{ success: boole
     result = await checkinByTraeDesktop(account)
   }
 
-  // 更新账号状态
+  // 更新账号状态（不更新 points，避免中间假值导致闪烁，真实积分由后续 getAccountPoints 统一更新）
   updateAccount(account.id, {
     lastCheckinAt: Date.now(),
     lastCheckinResult: result.success ? 'success' : 'failed',
-    lastCheckinMessage: result.message,
-    points: result.points ? (account.points || 0) + result.points : account.points
+    lastCheckinMessage: result.message
   })
 
   // 记录日志

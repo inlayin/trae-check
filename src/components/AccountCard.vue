@@ -162,12 +162,12 @@ function formatDateTime(timestamp: number): string {
 <style scoped>
 .account-card {
   padding: 18px;
-  transition: all 0.2s ease;
 }
 
 .account-card:hover {
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .account-card.disabled {
