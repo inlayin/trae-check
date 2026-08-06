@@ -55,9 +55,9 @@ function createTray() {
   tray.setToolTip('TraeCheck')
   tray.on('click', lifecycle.showWindow)
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '\u663e\u793a TraeCheck', click: lifecycle.showWindow },
+    { label: 'Show TraeCheck', click: lifecycle.showWindow },
     { type: 'separator' },
-    { label: '\u9000\u51fa', click: lifecycle.exit }
+    { label: 'Exit', click: lifecycle.exit }
   ]))
 }
 
