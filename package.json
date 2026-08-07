@@ -44,7 +44,7 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "https://gitee.com/inlayin/trae-check/releases/download/latest/"
+      "url": "https://gitee.com/jkjkouyu/trae-check/releases/download/latest/"
     },
     "files": [
       "dist",
