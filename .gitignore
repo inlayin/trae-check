@@ -2,6 +2,7 @@ node_modules
 dist
 dist-electron
 release
+release101
 *.log
 .DS_Store
 .env.local
