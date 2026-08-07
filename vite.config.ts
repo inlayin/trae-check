@@ -4,8 +4,12 @@ import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import { copyFileSync } from 'fs'
 import { resolve } from 'path'
+import pkg from './package.json' assert { type: 'json' }
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version)
+  },
   plugins: [
     vue(),
     electron([

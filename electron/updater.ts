@@ -12,6 +12,7 @@ let manualCheck = false
 let downloadCancellationToken: CancellationToken | null = null
 
 function send(channel: string, payload?: unknown) {
+  console.log(`[updater] send -> ${channel}`, payload)
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload)
   }
@@ -30,8 +31,18 @@ function normalizeReleaseNotes(notes: UpdateInfo['releaseNotes']): string {
 export function initAutoUpdater(window: BrowserWindow) {
   mainWindow = window
 
+  // 调试：转发渲染进程 console.log 到主进程终端
+  mainWindow.webContents.on('console-message', (_e, _level, message) => {
+    console.log(`[renderer] ${message}`)
+  })
+
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+
+  // 开发环境强制使用 dev-app-update.yml 测试更新流程
+  if (!app.isPackaged) {
+    autoUpdater.forceDevUpdateConfig = true
+  }
 
   // ===== autoUpdater 事件 → 渲染进程 =====
   autoUpdater.on('update-available', (info: UpdateInfo) => {
@@ -86,13 +97,11 @@ export function initAutoUpdater(window: BrowserWindow) {
     return true
   })
 
-  // ===== 启动后延迟自动检查（仅打包后生效）=====
-  if (app.isPackaged) {
-    setTimeout(() => {
-      manualCheck = false
-      autoUpdater.checkForUpdates().catch(() => {
-        // 启动自动检查静默失败
-      })
-    }, 3000)
-  }
+  // ===== 启动后延迟自动检查（打包后 + 开发环境均生效）=====
+  setTimeout(() => {
+    manualCheck = false
+    autoUpdater.checkForUpdates().catch(() => {
+      // 启动自动检查静默失败
+    })
+  }, 3000)
 }

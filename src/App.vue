@@ -114,6 +114,7 @@ import AccountList from './components/AccountList.vue'
 import CheckinLog from './components/CheckinLog.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AddAccountModal from './components/AddAccountModal.vue'
+import UpdateModal from './components/UpdateModal.vue'
 import AppTitleBar from './components/AppTitleBar.vue'
 
 const store = useAppStore()
@@ -173,9 +174,11 @@ function handleAddSuccess() {
 
 onMounted(() => {
   store.init()
+  console.log('[App] onMounted, 注册更新监听器')
 
   // 在线更新事件监听
   unsubAvailable = window.electronAPI.updater.onAvailable((info) => {
+    console.log('[App] 收到 update:available 事件', info)
     updateInfo.value = info
     showUpdateModal.value = true
   })

@@ -8,7 +8,7 @@
 
       <div class="modal-body">
         <div class="update-meta" v-if="info?.releaseDate">
-          发布日期：{{ info.releaseDate }}
+          发布日期：{{ formatDate(info.releaseDate) }}
         </div>
 
         <div class="release-notes-label">更新内容：</div>
@@ -121,6 +121,17 @@ function handleCancel() {
 
 function handleInstall() {
   void window.electronAPI.updater.install()
+}
+
+// 格式化 ISO 日期字符串为 YYYY年MM月DD日
+function formatDate(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}年${m}月${day}日`
 }
 </script>
 

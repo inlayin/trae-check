@@ -227,7 +227,7 @@
       <div class="about-info">
         <div class="about-row">
           <span class="about-label">版本</span>
-          <span class="about-value">v1.0.0</span>
+          <span class="about-value">v{{ appVersion }}</span>
         </div>
         <div class="about-row">
           <span class="about-label">技术栈</span>
@@ -264,6 +264,9 @@ import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
 const emit = defineEmits(['check-update'])
+
+// 由 vite.config.ts 的 define 注入，值来自 package.json 的 version
+const appVersion = __APP_VERSION__
 
 const nextRunText = computed(() => {
   if (!store.settings?.autoCheckin) return '未启用'

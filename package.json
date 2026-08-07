@@ -1,6 +1,6 @@
 {
   "name": "trae-check",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Trae Work 每日自动签到工具 - 支持多账号",
   "main": "dist-electron/main.js",
   "author": "trae-check",
