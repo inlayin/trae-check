@@ -125,7 +125,7 @@ async function handleSetLocal(id: string) {
   if (!confirmed) return
   const result = await store.setLocalAccount(id)
   emit('notify',
-    result?.success ? result.message : `切换失败：${result?.message || '未知错误'}`,
+    result?.success ? result.message : (result?.message || '未知错误'),
     result?.success ? 'success' : 'error')
 }
 

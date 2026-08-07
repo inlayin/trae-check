@@ -3,11 +3,15 @@ import path from 'path'
 import axios from 'axios'
 import type { Account, AppSettings, PointsTransaction, PointsDetailResult } from './types'
 import { updateAccount, addLog, getSettings, markCredentialExpired, getAccounts } from './store'
-const { decryptCredential, encryptCredential, refreshCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as {
-  decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean }
+const { decryptCredential, legacyCredentialReimportMessage, encryptCredential, refreshCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as {
+  decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean; legacyCredential?: boolean }
+  legacyCredentialReimportMessage: () => string
   encryptCredential: (value: any, storage: typeof safeStorage) => string
   refreshCredential: (value: any) => Promise<any>
   publicCredentialStatus: (value: any) => { credentialStatus: 'valid' | 'expiring' | 'expired' }
+}
+const { extractEntitlementDetails } = require('../electron/points-entitlement-detail.cjs') as {
+  extractEntitlementDetails: (data: any) => { totalPoints: number; transactions: PointsTransaction[] } | null
 }
 
 const TRAE_CHECKIN_CLAIM_PATH = '/trae/api/v2/ug/checkin_credits/claim'
@@ -47,6 +51,7 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
     if (!account.encryptedCredential) return { success: false, message: '该账号尚未导入 TRAE 桌面凭证' }
     if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用，无法读取 TRAE 凭证' }
     const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.legacyCredential) return { success: false, message: legacyCredentialReimportMessage() }
     if (dec.decryptionFailed || !dec.payload) {
       markCredentialExpired(account.id)
       return { success: false, message: '凭证已失效（跨机器导入需重新导入 TRAE 桌面凭证）', credentialExpired: true } as any
@@ -214,6 +219,7 @@ export async function getTotalPointsByTraeDesktop(account: Account): Promise<{ s
     if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用，无法读取 TRAE 凭证' }
 
     const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.legacyCredential) return { success: false, message: legacyCredentialReimportMessage() }
     if (dec.decryptionFailed || !dec.payload) {
       markCredentialExpired(account.id)
       return { success: false, message: '凭证已失效（跨机器导入需重新导入 TRAE 桌面凭证）' }
@@ -372,6 +378,7 @@ export async function getPointsDetailByTraeDesktop(account: Account): Promise<Po
     if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用，无法读取 TRAE 凭证', source: 'none' }
 
     const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.legacyCredential) return { success: false, message: legacyCredentialReimportMessage(), source: 'none', legacyCredential: true } as PointsDetailResult & { legacyCredential: boolean }
     if (dec.decryptionFailed || !dec.payload) {
       markCredentialExpired(account.id)
       return { success: false, message: '凭证已失效（跨机器导入需重新导入 TRAE 桌面凭证）', source: 'none' }
@@ -395,6 +402,23 @@ export async function getPointsDetailByTraeDesktop(account: Account): Promise<Po
       'Content-Type': 'application/json',
       'Authorization': `Cloud-IDE-JWT ${token}`,
       'x-device-id': deviceId
+    }
+
+    const entitlementUrl = `${host}/trae/api/v2/pay/user_current_entitlement_list`
+    try {
+      const response = await axios.post(entitlementUrl, { require_usage: true }, { headers, timeout: 15000 })
+      const detail = extractEntitlementDetails(response.data)
+      if (detail && detail.transactions.length > 0) {
+        return {
+          success: true,
+          message: '获取积分权益明细成功',
+          source: 'api',
+          totalPoints: detail.totalPoints,
+          transactions: detail.transactions
+        }
+      }
+    } catch (e: any) {
+      console.log('[PointsDetail] 获取积分权益明细失败:', e?.response?.status || e?.message || e)
     }
 
     for (const { method, path: apiPath } of TRAE_CREDITS_TRANSACTION_PATHS) {

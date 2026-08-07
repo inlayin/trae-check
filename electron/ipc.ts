@@ -23,9 +23,10 @@ const { getTraeDesktopCredentials, setTraeDesktopCredentials } = require('../ele
   setTraeDesktopCredentials: (credential: any, appData?: string) => { backupPath: string; wroteKeys: string[] }
 }
 const { restartTraeDesktop } = require('../electron/trae-process.cjs') as { restartTraeDesktop: () => Promise<{ launched: boolean; message: string; executablePath?: string }> }
-const { encryptCredential, decryptCredential, publicCredentialStatus, encryptWithPassword, decryptWithPassword } = require('../electron/desktop-credentials.cjs') as {
+const { encryptCredential, decryptCredential, legacyCredentialReimportMessage, publicCredentialStatus, encryptWithPassword, decryptWithPassword } = require('../electron/desktop-credentials.cjs') as {
   encryptCredential: (credential: any, storage: typeof safeStorage) => string
-  decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean }
+  decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean; legacyCredential?: boolean }
+  legacyCredentialReimportMessage: () => string
   publicCredentialStatus: (credential: any) => { type: string; credentialStatus: Account['credentialStatus'] }
   encryptWithPassword: (plaintext: string, password: string) => string
   decryptWithPassword: (base64Data: string, password: string) => string
@@ -134,6 +135,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     if (!account.encryptedCredential) return { success: false, message: '该账号未导入桌面凭证' }
     if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用' }
     const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.legacyCredential) return { success: false, message: legacyCredentialReimportMessage() }
     if (dec.decryptionFailed || !dec.payload) {
       markCredentialExpired(id)
       return { success: false, message: '凭证已失效（跨机器导入需重新导入）' }
@@ -177,6 +179,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     const account = accounts.find(a => a.id === id)
     if (!account) return cloneSafe({ success: false, message: '账号不存在', source: 'none' })
     const result = await getPointsDetailByTraeDesktop(account)
+    if ((result as any).legacyCredential) return cloneSafe(result)
     // API 不可用时回退展示本地签到记录
     if (!result.success || result.source === 'none') {
       const localLogs = getLogs(200).filter((log: any) => log.accountId === id)
@@ -223,6 +226,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
         if (includeCredentials && a.encryptedCredential) {
           // 1. safeStorage 解密出明文 credential
           const dec = decryptCredential(a.encryptedCredential, safeStorage)
+          if (dec.legacyCredential) throw new Error(legacyCredentialReimportMessage())
           if (dec.payload) {
             // 2. 用用户密码 AES-256-GCM 加密明文
             base.encryptedCredentialData = encryptWithPassword(JSON.stringify(dec.payload), password)

@@ -14,13 +14,18 @@
         </div>
 
         <template v-else-if="result">
-          <!-- 顶部提示条：数据来源为本地 -->
-          <div v-if="result.source === 'local'" class="notice-bar">
-            未获取到在线流水，仅展示本地签到记录
+          <div v-if="!result.success" class="error-state" role="alert">
+            <p>{{ result.message }}</p>
           </div>
 
-          <!-- 汇总卡片 -->
-          <div class="summary-card">
+          <template v-else>
+            <!-- 顶部提示条：数据来源为本地 -->
+            <div v-if="result.source === 'local'" class="notice-bar">
+              未获取到在线流水，仅展示本地签到记录
+            </div>
+
+            <!-- 汇总卡片 -->
+            <div class="summary-card">
             <div class="summary-item">
               <span class="summary-label">当前总积分</span>
               <span class="summary-value">{{ result.totalPoints || 0 }}<span class="unit">分</span></span>
@@ -33,8 +38,8 @@
             </div>
           </div>
 
-          <!-- 分类筛选 Tab（仅 API 流水时显示） -->
-          <div v-if="result.source === 'api' && transactions.length > 0" class="filter-tabs">
+            <!-- 分类筛选 Tab（仅 API 流水时显示） -->
+            <div v-if="result.source === 'api' && transactions.length > 0" class="filter-tabs">
             <button
               v-for="tab in tabs"
               :key="tab.key"
@@ -47,8 +52,8 @@
             </button>
           </div>
 
-          <!-- 流水列表（API） -->
-          <div v-if="result.source === 'api' && filteredTransactions.length > 0" class="transaction-list">
+            <!-- 流水列表（API） -->
+            <div v-if="result.source === 'api' && filteredTransactions.length > 0" class="transaction-list">
             <div
               v-for="(tx, idx) in filteredTransactions"
               :key="idx"
@@ -67,8 +72,8 @@
             </div>
           </div>
 
-          <!-- 本地签到记录列表 -->
-          <div v-else-if="result.source === 'local' && localLogs.length > 0" class="transaction-list">
+            <!-- 本地签到记录列表 -->
+            <div v-else-if="result.source === 'local' && localLogs.length > 0" class="transaction-list">
             <div
               v-for="log in localLogs"
               :key="log.id"
@@ -88,11 +93,12 @@
             </div>
           </div>
 
-          <!-- 空态 -->
-          <div v-else class="empty-state">
+            <!-- 空态 -->
+            <div v-else class="empty-state">
             <div class="empty-icon">📋</div>
             <p>暂无积分流水记录</p>
-          </div>
+            </div>
+          </template>
         </template>
       </div>
 
@@ -271,6 +277,19 @@ function formatTimestamp(ts: number): string {
   border-radius: var(--radius-sm);
   font-size: 12px;
   margin-bottom: 14px;
+}
+
+.error-state {
+  padding: 18px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-md);
+  color: var(--danger-color);
+}
+
+.error-state p {
+  margin: 0;
+  line-height: 1.6;
 }
 
 .summary-card {

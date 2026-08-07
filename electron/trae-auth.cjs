@@ -1,3 +1,4 @@
+const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -45,9 +46,13 @@ function getTraeDesktopCredentials(appData = process.env.APPDATA) {
   const machineId = storage['telemetry.machineId']
   if (typeof deviceId !== 'string' || !deviceId) throw new Error('TRAE desktop device ID is unavailable')
   if (typeof machineId !== 'string' || !machineId) throw new Error('TRAE desktop machine ID is unavailable')
-  const keyEntry = Object.entries(storage).find(([key]) => key.startsWith('iCubeAuthInfo://icube-dc:'))
-  if (!keyEntry || typeof keyEntry[1] !== 'string') throw new Error('TRAE desktop signing key is unavailable')
-  const signingKey = decryptTraeAuthInfo(keyEntry[1])
+  const dcPrefix = 'iCubeAuthInfo://icube-dc:'
+  const signingKeyEntries = Object.entries(storage)
+    .filter(([key, value]) => key.startsWith(dcPrefix) && typeof value === 'string')
+    .map(([key, value]) => ({ key, value }))
+  const signingKeyEntry = signingKeyEntries[0]
+  if (!signingKeyEntry) throw new Error('TRAE desktop signing key is unavailable')
+  const signingKey = decryptTraeAuthInfo(signingKeyEntry.value)
   if (typeof signingKey.privateKeyPEM !== 'string' || typeof signingKey.publicKeyPEM !== 'string') throw new Error('TRAE desktop signing key is invalid')
   const expiresAt = Date.parse(authInfo.expiredAt)
   const refreshExpiresAt = Date.parse(authInfo.refreshExpiredAt)
@@ -63,7 +68,10 @@ function getTraeDesktopCredentials(appData = process.env.APPDATA) {
     publicKeyPEM: signingKey.publicKeyPEM,
     userId: authInfo.userId,
     accountName: authInfo.account?.username || `TRAE 用户 ${authInfo.userId}`,
-    host: authInfo.host
+    host: authInfo.host,
+    authInfo,
+    signingKeyEntry,
+    signingKeyEntries
   }
 }
 
@@ -95,42 +103,56 @@ function encryptTraeAuthInfo(payload) {
 function setTraeDesktopCredentials(credential, appData = process.env.APPDATA) {
   if (!appData) throw new Error('Windows AppData directory is unavailable')
   const storagePath = path.join(appData, 'TRAE SOLO CN', 'User', 'globalStorage', 'storage.json')
+  if (!credential?.authInfo || typeof credential.authInfo !== 'object' || Array.isArray(credential.authInfo)) {
+    throw new Error('TRAE desktop credential is missing its complete local session')
+  }
+  const signingKeyEntries = credential.signingKeyEntries
+  if (!Array.isArray(signingKeyEntries) || signingKeyEntries.length === 0 || signingKeyEntries.some((entry) => !entry || typeof entry.key !== 'string' || !entry.key.startsWith('iCubeAuthInfo://icube-dc:') || typeof entry.value !== 'string')) {
+    throw new Error('TRAE desktop credential is missing its local signing key')
+  }
   if (!fs.existsSync(storagePath)) throw new Error('TRAE 桌面客户端 storage.json 不存在：' + storagePath)
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupPath = `${storagePath}.trae-check.bak.${timestamp}`
+  const tmpPath = `${storagePath}.trae-check.tmp`
   fs.copyFileSync(storagePath, backupPath)
 
+  try {
   const storage = JSON.parse(fs.readFileSync(storagePath, 'utf8'))
 
   const authInfo = {
+    ...credential.authInfo,
     token: credential.token,
     refreshToken: credential.refreshToken,
     expiredAt: new Date(credential.expiresAt).toISOString(),
-    refreshExpiredAt: new Date(credential.refreshExpiresAt).toISOString(),
-    userId: credential.userId,
-    account: { username: credential.accountName },
-    host: credential.host
+    refreshExpiredAt: new Date(credential.refreshExpiresAt).toISOString()
   }
   storage['iCubeAuthInfo://icube.cloudide'] = encryptTraeAuthInfo(authInfo)
 
-  // 签名密钥：删除所有旧 iCubeAuthInfo://icube-dc:* 条目，写入新账号的密钥
-  const dcPrefix = 'iCubeAuthInfo://icube-dc:'
-  for (const key of Object.keys(storage)) {
-    if (key.startsWith(dcPrefix)) delete storage[key]
-  }
-  const dcKey = `${dcPrefix}${credential.userId}`
-  storage[dcKey] = encryptTraeAuthInfo({
-    privateKeyPEM: credential.privateKeyPEM,
-    publicKeyPEM: credential.publicKeyPEM
-  })
+  // Restore every signing-key entry captured with this desktop session.
+  for (const entry of signingKeyEntries) storage[entry.key] = entry.value
 
   // 原子写入：先写临时文件再 rename，避免写入中途崩溃损坏原文件
-  const tmpPath = `${storagePath}.trae-check.tmp`
   fs.writeFileSync(tmpPath, JSON.stringify(storage, null, 2), 'utf8')
   fs.renameSync(tmpPath, storagePath)
 
-  return { backupPath, wroteKeys: ['iCubeAuthInfo://icube.cloudide', dcKey] }
+  const written = JSON.parse(fs.readFileSync(storagePath, 'utf8'))
+  assert.deepStrictEqual(decryptTraeAuthInfo(written['iCubeAuthInfo://icube.cloudide']), authInfo)
+  for (const entry of signingKeyEntries) {
+    assert.deepStrictEqual(decryptTraeAuthInfo(written[entry.key]), decryptTraeAuthInfo(entry.value))
+  }
+
+  return { backupPath, wroteKeys: ['iCubeAuthInfo://icube.cloudide', ...signingKeyEntries.map((entry) => entry.key)] }
+  } catch (error) {
+    try {
+      fs.copyFileSync(backupPath, storagePath)
+    } catch (restoreError) {
+      throw new Error(`TRAE desktop credential write failed and the original local session could not be restored: ${restoreError.message}`)
+    } finally {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+    }
+    throw new Error(`TRAE desktop credential write failed; the original local session was restored: ${error.message}`)
+  }
 }
 
 module.exports = { decryptTraeAuthInfo, getTraeDesktopCredentials, getTraeDesktopToken, encryptTraeAuthInfo, setTraeDesktopCredentials }

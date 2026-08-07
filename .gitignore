@@ -18,3 +18,4 @@ release_gitee
 .idea
 *.local
 .trae
+tests

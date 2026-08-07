@@ -6,6 +6,22 @@ function assertCredential(value) {
   if (!Number.isFinite(value.expiresAt) || !Number.isFinite(value.refreshExpiresAt)) {
     throw new Error('Invalid TRAE desktop credential expiry')
   }
+  const authInfoRequired = ['userId', 'token', 'refreshToken', 'expiredAt', 'refreshExpiredAt', 'host']
+  if (!value.authInfo || typeof value.authInfo !== 'object' || authInfoRequired.some((key) => typeof value.authInfo[key] !== 'string' || !value.authInfo[key]) || value.authInfo.userId !== value.userId || !value.authInfo.account || typeof value.authInfo.account !== 'object' || typeof value.authInfo.account.username !== 'string' || !value.authInfo.account.username) {
+    const error = new Error('Invalid TRAE desktop credential auth info')
+    error.legacyCredential = true
+    throw error
+  }
+  if (!Array.isArray(value.signingKeyEntries) || value.signingKeyEntries.length === 0 || value.signingKeyEntries.some((entry) => !entry || typeof entry.key !== 'string' || !entry.key.startsWith('iCubeAuthInfo://icube-dc:') || typeof entry.value !== 'string' || !entry.value)) {
+    const error = new Error('Invalid TRAE desktop credential signing key')
+    error.legacyCredential = true
+    throw error
+  }
+  if (!value.signingKeyEntry || !value.signingKeyEntries.some((entry) => entry.key === value.signingKeyEntry.key && entry.value === value.signingKeyEntry.value)) {
+    const error = new Error('Invalid TRAE desktop credential active signing key')
+    error.legacyCredential = true
+    throw error
+  }
   return value
 }
 
@@ -27,8 +43,13 @@ function decryptCredential(value, safeStorage) {
     const plaintext = safeStorage.decryptString(Buffer.from(String(value), 'base64'))
     return { payload: assertCredential(JSON.parse(plaintext)), decryptionFailed: false }
   } catch (e) {
+    if (e?.legacyCredential) return { payload: null, decryptionFailed: false, legacyCredential: true }
     return { payload: null, decryptionFailed: isDecryptionFailedError(e) }
   }
+}
+
+function legacyCredentialReimportMessage() {
+  return '此账号由旧版本导入，缺少完整桌面会话；请在 TRAE 登录该账号后重新导入，再设为本地。'
 }
 
 function publicCredentialStatus(value, now = Date.now()) {
@@ -85,7 +106,20 @@ async function refreshCredential(credential, dependencies = {}) {
   const expiresAt = Number(data.TokenExpireAt)
   const refreshExpiresAt = Date.parse(data.RefreshExpireAt)
   if (!Number.isFinite(expiresAt) || !Number.isFinite(refreshExpiresAt)) throw new Error('TRAE credential refresh returned invalid expiry')
-  return { ...credential, token: data.Token, refreshToken: data.RefreshToken, expiresAt, refreshExpiresAt }
+  return {
+    ...credential,
+    token: data.Token,
+    refreshToken: data.RefreshToken,
+    expiresAt,
+    refreshExpiresAt,
+    authInfo: {
+      ...credential.authInfo,
+      token: data.Token,
+      refreshToken: data.RefreshToken,
+      expiredAt: String(data.TokenExpireAt),
+      refreshExpiredAt: data.RefreshExpireAt
+    }
+  }
 }
 
 // ========== 密码加密导出/导入（方案 B） ==========
@@ -122,4 +156,4 @@ function decryptWithPassword(base64Data, password) {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')
 }
 
-module.exports = { encryptCredential, decryptCredential, publicCredentialStatus, upsertDesktopAccount, refreshCredential, encryptWithPassword, decryptWithPassword }
+module.exports = { encryptCredential, decryptCredential, legacyCredentialReimportMessage, publicCredentialStatus, upsertDesktopAccount, refreshCredential, encryptWithPassword, decryptWithPassword }
