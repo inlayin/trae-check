@@ -25,6 +25,24 @@ export interface CheckinLog {
   pointsGained?: number
 }
 
+// 积分流水条目
+export interface PointsTransaction {
+  type: 'checkin' | 'usage' | 'gift' | 'other' // 按描述关键词分类
+  amount: number // 正=获得, 负=消耗
+  description: string
+  timestamp: number
+}
+
+// 积分详情结果
+export interface PointsDetailResult {
+  success: boolean
+  message: string
+  source: 'api' | 'local' | 'none'
+  totalPoints?: number
+  transactions?: PointsTransaction[]
+  localCheckinLogs?: CheckinLog[] // API 不可用时的回退
+}
+
 // 应用设置
 export interface AppSettings {
   autoCheckin: boolean // 是否开启自动签到
@@ -43,22 +61,50 @@ export interface AppSettings {
   }
 }
 
-// 导出文件结构
+// 导出文件结构（version 2: 密码加密凭证）
 export interface ExportData {
   version: number
   exportedAt: number
   appVersion: string
   containsCredentials: boolean
+  credentialFormat?: 'encrypted' | 'plaintext'  // v2 新增，含凭证时为 'encrypted'
   count: number
-  accounts: Account[]
+  accounts: ExportAccount[]
 }
 
-// 导入预览结果
+// 导出文件中的账号（凭证字段用密码加密）
+export interface ExportAccount {
+  id: string
+  name: string
+  cookie: string
+  createdAt: number
+  enabled: boolean
+  desktopUserId?: string
+  credentialStatus?: string
+  // v2: 用密码 AES-256-GCM 加密后的凭证密文（含 safeStorage 解密后的明文）
+  encryptedCredentialData?: string
+  // v1 兼容: safeStorage 密文（跨机器不可用）
+  encryptedCredential?: string
+}
+
+// 导入预览结果（不含敏感凭证字段）
 export interface ImportPreviewResult {
   success: boolean
-  accounts?: (Account & { conflict: boolean })[]
+  accounts?: ImportPreviewAccount[]
   invalidCount?: number
   message?: string
+}
+
+// 导入预览中的账号（不含 encryptedCredential，安全传给前端）
+export interface ImportPreviewAccount {
+  id: string
+  name: string
+  desktopUserId?: string
+  createdAt: number
+  enabled: boolean
+  credentialStatus?: string
+  hasCredential: boolean
+  conflict: boolean
 }
 
 // 导入执行结果

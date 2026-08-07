@@ -1,10 +1,10 @@
 import { BrowserView, app, safeStorage } from 'electron'
 import path from 'path'
 import axios from 'axios'
-import type { Account, AppSettings } from './types'
-import { updateAccount, addLog, getSettings } from './store'
+import type { Account, AppSettings, PointsTransaction, PointsDetailResult } from './types'
+import { updateAccount, addLog, getSettings, markCredentialExpired, getAccounts } from './store'
 const { decryptCredential, encryptCredential, refreshCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as {
-  decryptCredential: (value: string, storage: typeof safeStorage) => any
+  decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean }
   encryptCredential: (value: any, storage: typeof safeStorage) => string
   refreshCredential: (value: any) => Promise<any>
   publicCredentialStatus: (value: any) => { credentialStatus: 'valid' | 'expiring' | 'expired' }
@@ -22,6 +22,19 @@ const TRAE_CREDITS_BALANCE_PATHS = [
   '/trae/api/v3/ug/user/info'
 ]
 
+// 积分流水的候选接口（method, path），按优先级排序
+const TRAE_CREDITS_TRANSACTION_PATHS: Array<{ method: 'GET' | 'POST'; path: string }> = [
+  { method: 'POST', path: '/trae/api/v2/ug/credits/transactions' },
+  { method: 'GET', path: '/trae/api/v2/ug/credits/transactions' },
+  { method: 'GET', path: '/trae/api/v2/ug/credits/history' },
+  { method: 'GET', path: '/trae/api/v2/ug/credits/records' },
+  { method: 'GET', path: '/trae/api/v2/ug/credits/logs' },
+  { method: 'POST', path: '/trae/api/v2/ug/wallet/transactions' },
+  { method: 'GET', path: '/trae/api/v2/ug/wallet/history' },
+  { method: 'GET', path: '/trae/api/v2/pay/credits/transactions' },
+  { method: 'GET', path: '/trae/api/v2/pay/user_credit_history' }
+]
+
 type CheckinResult = { success: boolean; message: string; points?: number }
 
 function apiSucceeded(data: any): boolean {
@@ -33,7 +46,12 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
   try {
     if (!account.encryptedCredential) return { success: false, message: '该账号尚未导入 TRAE 桌面凭证' }
     if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用，无法读取 TRAE 凭证' }
-    let credential = decryptCredential(account.encryptedCredential, safeStorage)
+    const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.decryptionFailed || !dec.payload) {
+      markCredentialExpired(account.id)
+      return { success: false, message: '凭证已失效（跨机器导入需重新导入 TRAE 桌面凭证）', credentialExpired: true } as any
+    }
+    let credential = dec.payload
     if (credential.expiresAt - Date.now() <= 5 * 60 * 1000) {
       try {
         credential = await refreshCredential(credential)
@@ -195,7 +213,12 @@ export async function getTotalPointsByTraeDesktop(account: Account): Promise<{ s
     if (!account.encryptedCredential) return { success: false, message: '该账号尚未导入 TRAE 桌面凭证' }
     if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用，无法读取 TRAE 凭证' }
 
-    let credential = decryptCredential(account.encryptedCredential, safeStorage)
+    const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.decryptionFailed || !dec.payload) {
+      markCredentialExpired(account.id)
+      return { success: false, message: '凭证已失效（跨机器导入需重新导入 TRAE 桌面凭证）' }
+    }
+    let credential = dec.payload
     if (credential.expiresAt - Date.now() <= 5 * 60 * 1000) {
       try {
         credential = await refreshCredential(credential)
@@ -270,6 +293,155 @@ export async function getTotalPointsByTraeDesktop(account: Account): Promise<{ s
   } catch (err: any) {
     console.error('[Points] 获取积分异常:', err)
     return { success: false, message: '获取积分失败: ' + (err.response?.data?.message || err.message || err) }
+  }
+}
+
+/**
+ * 按描述关键词把积分流水分类为 checkin / usage / gift / other。
+ */
+function classifyTransaction(description: string): PointsTransaction['type'] {
+  const lower = (description || '').toLowerCase()
+  if (lower.includes('签到') || lower.includes('check') || lower.includes('claim') || lower.includes('每日') || lower.includes('daily')) {
+    return 'checkin'
+  }
+  if (lower.includes('使用') || lower.includes('消耗') || lower.includes('扣') || lower.includes('usage') || lower.includes('consume') || lower.includes('spend') || lower.includes('deduct') || lower.includes('cost')) {
+    return 'usage'
+  }
+  if (lower.includes('赠送') || lower.includes('礼物') || lower.includes('gift') || lower.includes('reward') || lower.includes('bonus') || lower.includes('活动') || lower.includes('activity')) {
+    return 'gift'
+  }
+  return 'other'
+}
+
+/**
+ * 从流水接口响应中提取交易数组。尝试常见响应包装结构。
+ */
+function extractTransactions(data: any): Array<Record<string, any>> | null {
+  if (!data) return null
+  const candidates = [
+    data?.data?.list,
+    data?.data?.records,
+    data?.data?.items,
+    data?.data?.transactions,
+    data?.data,          // data 本身可能是数组
+    data?.list,
+    data?.records,
+    data?.items,
+    data?.transactions
+  ]
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length > 0) return c
+  }
+  return null
+}
+
+/**
+ * 把单条原始流水记录归一化为 PointsTransaction。
+ */
+function normalizeTransaction(raw: any): PointsTransaction | null {
+  if (!raw || typeof raw !== 'object') return null
+  const description = String(raw.description || raw.title || raw.remark || raw.reason || raw.type_name || raw.operation || '')
+  // amount 字段名变体
+  const amount = Number(raw.amount ?? raw.change ?? raw.points ?? raw.credit ?? raw.value ?? raw.delta ?? 0)
+  if (!Number.isFinite(amount) || amount === 0) return null
+  // 时间字段名变体
+  const timeRaw = raw.created_at ?? raw.create_time ?? raw.timestamp ?? raw.time ?? raw.createdat ?? raw.date
+  let timestamp: number
+  if (typeof timeRaw === 'number') {
+    // 秒级时间戳转毫秒
+    timestamp = timeRaw > 1e12 ? timeRaw : timeRaw * 1000
+  } else if (typeof timeRaw === 'string') {
+    timestamp = Date.parse(timeRaw) || Date.now()
+  } else {
+    timestamp = Date.now()
+  }
+  return {
+    type: classifyTransaction(description || (amount > 0 ? 'gift' : 'usage')),
+    amount,
+    description: description || (amount > 0 ? '积分获得' : '积分消耗'),
+    timestamp
+  }
+}
+
+/**
+ * 获取账号积分流水明细。依次尝试候选流水接口，命中后归一化并按类型分类。
+ */
+export async function getPointsDetailByTraeDesktop(account: Account): Promise<PointsDetailResult> {
+  try {
+    if (!account.encryptedCredential) return { success: false, message: '该账号尚未导入 TRAE 桌面凭证', source: 'none' }
+    if (!safeStorage.isEncryptionAvailable()) return { success: false, message: '系统加密服务不可用，无法读取 TRAE 凭证', source: 'none' }
+
+    const dec = decryptCredential(account.encryptedCredential, safeStorage)
+    if (dec.decryptionFailed || !dec.payload) {
+      markCredentialExpired(account.id)
+      return { success: false, message: '凭证已失效（跨机器导入需重新导入 TRAE 桌面凭证）', source: 'none' }
+    }
+    let credential = dec.payload
+    if (credential.expiresAt - Date.now() <= 5 * 60 * 1000) {
+      try {
+        credential = await refreshCredential(credential)
+        updateAccount(account.id, {
+          encryptedCredential: encryptCredential(credential, safeStorage),
+          credentialStatus: publicCredentialStatus(credential).credentialStatus
+        })
+      } catch {
+        updateAccount(account.id, { credentialStatus: 'expired' })
+        return { success: false, message: '凭证已失效，请重新导入', source: 'none' }
+      }
+    }
+
+    const { token, deviceId, host } = credential
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Cloud-IDE-JWT ${token}`,
+      'x-device-id': deviceId
+    }
+
+    for (const { method, path: apiPath } of TRAE_CREDITS_TRANSACTION_PATHS) {
+      const url = `${host}${apiPath}`
+      try {
+        console.log('[PointsDetail] 尝试接口:', method, url)
+        const response = method === 'POST'
+          ? await axios.post(url, {}, { headers, timeout: 15000 })
+          : await axios.get(url, { headers, timeout: 15000 })
+        console.log('[PointsDetail] 接口响应:', url, '->', JSON.stringify(response.data).slice(0, 800))
+        if (!apiSucceeded(response.data)) {
+          console.log('[PointsDetail] 接口业务失败:', response.data?.message || response.data?.msg)
+          continue
+        }
+        const rawList = extractTransactions(response.data)
+        if (!rawList) {
+          console.log('[PointsDetail] 未提取到流水数组')
+          continue
+        }
+        const transactions: PointsTransaction[] = []
+        for (const raw of rawList) {
+          const normalized = normalizeTransaction(raw)
+          if (normalized) transactions.push(normalized)
+        }
+        if (transactions.length === 0) {
+          console.log('[PointsDetail] 流水数组为空或归一化后为空')
+          continue
+        }
+        transactions.sort((a, b) => b.timestamp - a.timestamp)
+        console.log('[PointsDetail] 命中接口:', url, '流水条数:', transactions.length)
+        return {
+          success: true,
+          message: '获取积分流水成功',
+          source: 'api',
+          totalPoints: account.points,
+          transactions
+        }
+      } catch (e: any) {
+        const status = e?.response?.status
+        console.log('[PointsDetail] 接口失败:', url, '->', status || e?.message || e)
+      }
+    }
+
+    return { success: false, message: '所有候选流水接口均未返回数据', source: 'none' }
+  } catch (err: any) {
+    console.error('[PointsDetail] 获取积分流水异常:', err)
+    return { success: false, message: '获取积分流水失败: ' + (err.response?.data?.message || err.message || err), source: 'none' }
   }
 }
 
@@ -582,7 +754,6 @@ export async function performCheckin(account: Account): Promise<{ success: boole
  * 执行所有启用的账号签到
  */
 export async function performAllCheckin(): Promise<Array<{ account: Account; result: { success: boolean; message: string; points?: number } }>> {
-  const { getAccounts } = require('./store')
   const accounts = getAccounts().filter((a: Account) => a.enabled)
   const results: Array<{ account: Account; result: any }> = []
 

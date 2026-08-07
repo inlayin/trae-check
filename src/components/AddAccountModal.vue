@@ -45,8 +45,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, inject } from 'vue'
 import { useAppStore } from '../stores/app'
+
+const showAlert = inject<(title: string, message?: string, type?: string) => Promise<boolean>>('showAlert')!
 
 const props = defineProps<{
   visible: boolean
@@ -79,7 +81,7 @@ async function importDesktopAccount() {
     await store.importDesktopAccount()
     emit('success')
   } catch (e: any) {
-    alert('导入失败: ' + (e.message || e))
+    void showAlert('导入失败', e.message || String(e), 'error')
   } finally {
     submitting.value = false
   }

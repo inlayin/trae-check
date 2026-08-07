@@ -13,8 +13,22 @@ function encryptCredential(value, safeStorage) {
   return safeStorage.encryptString(JSON.stringify(assertCredential(value))).toString('base64')
 }
 
+// 判断 safeStorage 报错是否为跨机器/密钥变更类解密失败
+function isDecryptionFailedError(e) {
+  if (!e) return false
+  const msg = (e.message || String(e)).toLowerCase()
+  return msg.includes('decrypt') || msg.includes('ciphertext') || msg.includes('decryptstring')
+}
+
+// 解密凭证；跨机器/密钥失效时返回 { payload:null, decryptionFailed:true }。
 function decryptCredential(value, safeStorage) {
-  return assertCredential(JSON.parse(safeStorage.decryptString(Buffer.from(value, 'base64'))))
+  if (!value) return { payload: null, decryptionFailed: false }
+  try {
+    const plaintext = safeStorage.decryptString(Buffer.from(String(value), 'base64'))
+    return { payload: assertCredential(JSON.parse(plaintext)), decryptionFailed: false }
+  } catch (e) {
+    return { payload: null, decryptionFailed: isDecryptionFailedError(e) }
+  }
 }
 
 function publicCredentialStatus(value, now = Date.now()) {
@@ -74,4 +88,38 @@ async function refreshCredential(credential, dependencies = {}) {
   return { ...credential, token: data.Token, refreshToken: data.RefreshToken, expiresAt, refreshExpiresAt }
 }
 
-module.exports = { encryptCredential, decryptCredential, publicCredentialStatus, upsertDesktopAccount, refreshCredential }
+// ========== 密码加密导出/导入（方案 B） ==========
+// 使用 PBKDF2 派生密钥 + AES-256-GCM 加解密，确保跨机器可迁移
+
+const PBKDF2_ITERATIONS = 100000
+const KEY_LENGTH = 32       // AES-256
+const IV_LENGTH = 12        // GCM 标准
+const SALT_LENGTH = 16
+
+function encryptWithPassword(plaintext, password) {
+  const crypto = require('node:crypto')
+  const salt = crypto.randomBytes(SALT_LENGTH)
+  const key = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256')
+  const iv = crypto.randomBytes(IV_LENGTH)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
+  const authTag = cipher.getAuthTag()
+  // 打包格式：salt(16) + iv(12) + authTag(16) + ciphertext
+  return Buffer.concat([salt, iv, authTag, encrypted]).toString('base64')
+}
+
+function decryptWithPassword(base64Data, password) {
+  const crypto = require('node:crypto')
+  const buf = Buffer.from(base64Data, 'base64')
+  if (buf.length < SALT_LENGTH + IV_LENGTH + 16) throw new Error('加密数据格式无效')
+  const salt = buf.subarray(0, SALT_LENGTH)
+  const iv = buf.subarray(SALT_LENGTH, SALT_LENGTH + IV_LENGTH)
+  const authTag = buf.subarray(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + 16)
+  const ciphertext = buf.subarray(SALT_LENGTH + IV_LENGTH + 16)
+  const key = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256')
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(authTag)
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8')
+}
+
+module.exports = { encryptCredential, decryptCredential, publicCredentialStatus, upsertDesktopAccount, refreshCredential, encryptWithPassword, decryptWithPassword }

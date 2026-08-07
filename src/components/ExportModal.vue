@@ -47,7 +47,29 @@
           <div class="tip-box" v-if="includeCredentials">
             <div class="tip-icon">⚠️</div>
             <div class="tip-content">
-              <p class="tip-desc">导出文件将包含登录凭证，请注意保管，避免泄露。</p>
+              <p class="tip-desc">导出文件将包含登录凭证，需设置密码加密保护。请妥善保管密码，丢失密码将无法导入。</p>
+            </div>
+          </div>
+
+          <!-- 密码输入 -->
+          <div class="password-section" v-if="includeCredentials">
+            <div class="form-field">
+              <label class="field-label">导出密码</label>
+              <input
+                type="password"
+                v-model="password"
+                placeholder="请输入导出密码"
+                class="text-input"
+              />
+            </div>
+            <div class="form-field">
+              <label class="field-label">确认密码</label>
+              <input
+                type="password"
+                v-model="passwordConfirm"
+                placeholder="请再次输入密码"
+                class="text-input"
+              />
             </div>
           </div>
         </div>
@@ -58,7 +80,7 @@
         <button
           class="btn btn-primary"
           @click="handleExport"
-          :disabled="submitting || selectedIds.length === 0"
+          :disabled="submitting || selectedIds.length === 0 || (includeCredentials && (!password || !passwordConfirm))"
         >
           <span v-if="submitting" class="spinner"></span>
           <span>{{ submitting ? '导出中...' : `导出 ${selectedIds.length} 个账号` }}</span>
@@ -69,15 +91,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, inject } from 'vue'
 import { useAppStore } from '../stores/app'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits(['update:visible', 'success'])
 
+const showAlert = inject<(title: string, message?: string, type?: string) => Promise<boolean>>('showAlert')!
+
 const store = useAppStore()
 const selectedIds = ref<string[]>([])
 const includeCredentials = ref(true)
+const password = ref('')
+const passwordConfirm = ref('')
 const submitting = ref(false)
 
 const allSelected = computed(() =>
@@ -86,9 +112,10 @@ const allSelected = computed(() =>
 
 watch(() => props.visible, (val) => {
   if (val) {
-    // 默认全选
     selectedIds.value = store.accounts.map(a => a.id)
     includeCredentials.value = true
+    password.value = ''
+    passwordConfirm.value = ''
   }
 })
 
@@ -105,27 +132,37 @@ function handleClose() {
 }
 
 async function handleExport() {
+  // 含凭证时校验密码
   if (includeCredentials.value) {
-    const confirmed = window.confirm('导出文件包含登录凭证，请注意保管，确认导出？')
-    if (!confirmed) return
+    if (!password.value) {
+      void showAlert('提示', '请输入导出密码', 'warning')
+      return
+    }
+    if (password.value.length < 4) {
+      void showAlert('提示', '密码长度至少 4 位', 'warning')
+      return
+    }
+    if (password.value !== passwordConfirm.value) {
+      void showAlert('提示', '两次输入的密码不一致', 'warning')
+      return
+    }
   }
 
   submitting.value = true
   try {
-    // 解除 Vue Proxy，避免 IPC 序列化失败
     const safeIds = JSON.parse(JSON.stringify(selectedIds.value))
-    const safeIncludeCredentials = Boolean(includeCredentials.value)
-    const result = await store.exportAccounts(safeIds, safeIncludeCredentials)
+    const safeInclude = Boolean(includeCredentials.value)
+    const safePwd = String(password.value || '')
+    const result = await store.exportAccounts(safeIds, safeInclude, safePwd)
     if (result.success) {
       emit('success', result.path)
     } else if (result.canceled) {
-      // 用户主动取消，不提示错误
       handleClose()
     } else {
-      alert(result.message || '导出失败')
+      void showAlert('导出失败', result.message, 'error')
     }
   } catch (e: any) {
-    alert('导出失败: ' + (e.message || e))
+    void showAlert('导出失败', e.message || String(e), 'error')
   } finally {
     submitting.value = false
   }
@@ -204,7 +241,7 @@ async function handleExport() {
 }
 
 .account-list-export {
-  max-height: 240px;
+  max-height: 200px;
   overflow-y: auto;
   margin-bottom: 16px;
 }
@@ -289,6 +326,38 @@ async function handleExport() {
   font-size: 12px;
   color: #92400e;
   line-height: 1.5;
+}
+
+.password-section {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.text-input {
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.text-input:focus {
+  border-color: var(--primary-color);
 }
 
 .modal-footer {

@@ -41,27 +41,55 @@
 
     <!-- 卡片底部 -->
     <div class="card-footer">
-      <button
-        class="btn btn-sm btn-primary"
-        @click="handleCheckin"
-        :disabled="checkingIn || !account.enabled"
-      >
-        <span v-if="checkingIn" class="spinner"></span>
-        <span>{{ checkingIn ? '签到中' : '立即签到' }}</span>
-      </button>
-      <button type="button" class="btn btn-sm btn-outline" @click.stop="startEdit">
-        编辑
-      </button>
-      <button class="btn btn-sm btn-outline danger" @click="handleDelete">
-        删除
-      </button>
+      <div class="footer-row footer-primary">
+        <button
+          class="btn btn-sm btn-primary"
+          @click="handleCheckin"
+          :disabled="checkingIn || !account.enabled"
+        >
+          <span v-if="checkingIn" class="spinner"></span>
+          <span>{{ checkingIn ? '签到中' : '立即签到' }}</span>
+        </button>
+        <button class="btn btn-sm btn-outline" @click="handlePointsDetail">积分详情</button>
+      </div>
+      <div class="footer-row footer-secondary">
+        <button
+          class="btn btn-sm btn-outline"
+          @click="handleSetLocal"
+          :disabled="!account.desktopUserId"
+          :title="!account.desktopUserId ? '该账号未导入桌面凭证' : '切换 TRAE 桌面客户端到本账号'"
+        >
+          设为本地
+        </button>
+        <button type="button" class="btn btn-sm btn-outline" @click.stop="startEdit">
+          编辑
+        </button>
+        <button class="btn btn-sm btn-outline danger" @click="handleDelete">
+          删除
+        </button>
+      </div>
     </div>
   </div>
   <div v-if="editing" class="edit-overlay" @click.self="cancelEdit">
     <div class="edit-dialog">
-      <h3>编辑账号名称</h3>
-      <input v-model="draftName" autofocus @keyup.enter="saveEdit" @keyup.esc="cancelEdit" />
-      <div class="edit-actions"><button class="btn btn-sm btn-outline" @click="cancelEdit">取消</button><button class="btn btn-sm btn-primary" @click="saveEdit">保存</button></div>
+      <div class="edit-dialog-header">
+        <h3>编辑账号名称</h3>
+        <button class="edit-close-btn" @click="cancelEdit">✕</button>
+      </div>
+      <div class="edit-dialog-body">
+        <input
+          v-model="draftName"
+          class="input"
+          autofocus
+          placeholder="请输入账号名称"
+          @keyup.enter="saveEdit"
+          @keyup.esc="cancelEdit"
+        />
+      </div>
+      <div class="edit-dialog-footer">
+        <button class="btn btn-sm btn-outline" @click="cancelEdit">取消</button>
+        <button class="btn btn-sm btn-primary" @click="saveEdit">保存</button>
+      </div>
     </div>
   </div>
 </template>
@@ -74,7 +102,7 @@ const props = defineProps<{
   account: Account
 }>()
 
-const emit = defineEmits(['checkin', 'toggle', 'delete', 'edit'])
+const emit = defineEmits(['checkin', 'toggle', 'delete', 'edit', 'set-local', 'points-detail'])
 
 const checkingIn = ref(false)
 const editing = ref(false)
@@ -134,6 +162,14 @@ async function handleCheckin() {
 
 function handleDelete() {
   emit('delete', props.account.id)
+}
+
+function handleSetLocal() {
+  emit('set-local', props.account.id)
+}
+
+function handlePointsDetail() {
+  emit('points-detail', props.account.id)
 }
 
 function startEdit() { draftName.value = props.account.name; editing.value = true }
@@ -214,10 +250,63 @@ function formatDateTime(timestamp: number): string {
 
 .account-name-input { width: 120px; height: 24px; border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px; }
 .badge { width: fit-content; align-self: flex-start; white-space: nowrap; }
-.edit-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.35); }
-.edit-dialog { width: 360px; padding: 20px; border-radius: 10px; background: var(--bg-primary); box-shadow: var(--shadow-lg); }
-.edit-dialog input { width: 100%; box-sizing: border-box; margin: 16px 0; padding: 9px; border: 1px solid var(--border-color); border-radius: 6px; }
-.edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.edit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(3px);
+}
+.edit-dialog {
+  width: 380px;
+  max-width: 90vw;
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+.edit-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--border-color);
+}
+.edit-dialog-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.edit-close-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+.edit-close-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.edit-dialog-body {
+  padding: 20px 22px;
+}
+.edit-dialog-body .input {
+  font-size: 14px;
+}
+.edit-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-color);
+}
 
 .card-body {
   margin-bottom: 16px;
@@ -262,11 +351,26 @@ function formatDateTime(timestamp: number): string {
 
 .card-footer {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.card-footer .btn {
+.footer-row {
+  display: flex;
+  gap: 8px;
+}
+
+.footer-row .btn {
   flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.footer-secondary .btn {
+  font-size: 12px;
+  padding: 4px 8px;
 }
 
 .btn-outline.danger {

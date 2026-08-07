@@ -93,8 +93,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useAppStore } from '../stores/app'
+
+const showConfirm = inject<(o: { title: string; message?: string; type?: string; confirmText?: string; cancelText?: string }) => Promise<boolean>>('showConfirm')!
 
 const store = useAppStore()
 const filter = ref<'all' | 'success' | 'failed'>('all')
@@ -122,7 +124,14 @@ async function handleRefresh() {
 }
 
 async function handleClear() {
-  if (confirm('确定要清空所有签到日志吗？此操作不可恢复。')) {
+  const confirmed = await showConfirm({
+    title: '清空日志',
+    message: '确定要清空所有签到日志吗？此操作不可恢复。',
+    type: 'danger',
+    confirmText: '清空',
+    cancelText: '取消'
+  })
+  if (confirmed) {
     await store.clearLogs()
   }
 }

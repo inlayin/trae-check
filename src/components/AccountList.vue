@@ -42,6 +42,8 @@
         @toggle="handleToggle"
         @delete="handleDelete"
         @edit="handleEdit"
+        @set-local="handleSetLocal"
+        @points-detail="handlePointsDetail"
       />
     </div>
 
@@ -54,16 +56,30 @@
         ＋ 添加第一个账号
       </button>
     </div>
+
+    <!-- 积分详情模态框 -->
+    <PointsDetailModal
+      v-if="pointsDetailVisible"
+      :account-id="pointsDetailAccountId"
+      :account-name="pointsDetailAccountName"
+      @close="pointsDetailVisible = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed, inject } from 'vue'
 import { useAppStore } from '../stores/app'
 import AccountCard from './AccountCard.vue'
+import PointsDetailModal from './PointsDetailModal.vue'
 
 const store = useAppStore()
 const emit = defineEmits(['add-account', 'notify'])
+const showConfirm = inject<(o: { title: string; message?: string; type?: string; confirmText?: string; cancelText?: string }) => Promise<boolean>>('showConfirm')!
+
+const pointsDetailVisible = ref(false)
+const pointsDetailAccountId = ref('')
+const pointsDetailAccountName = ref('')
 
 const totalPoints = computed(() => {
   return store.accounts.reduce((sum, a) => sum + (a.points || 0), 0)
@@ -81,21 +97,43 @@ async function handleToggle(id: string, enabled: boolean) {
 }
 
 async function handleDelete(id: string) {
-  if (confirm('确定要删除这个账号吗？此操作不可恢复。')) {
+  const confirmed = await showConfirm({
+    title: '删除账号',
+    message: '确定要删除这个账号吗？此操作不可恢复。',
+    type: 'danger',
+    confirmText: '删除',
+    cancelText: '取消'
+  })
+  if (confirmed) {
     await store.deleteAccount(id)
   }
 }
 
 function handleEdit(id: string, newName?: string) {
-  const account = store.accounts.find(item => item.id === id)
-  if (!account) return
-  if (newName) { void store.updateAccount(id, { name: newName }); return }
-  const name = window.prompt('请输入账号名称', account.name)?.trim()
-  if (!name || name === account.name) return
-  void store.updateAccount(id, { name })
-  return
-  // 可以后续实现编辑功能
-  alert('编辑功能开发中...')
+  if (!newName) return
+  void store.updateAccount(id, { name: newName })
+}
+
+async function handleSetLocal(id: string) {
+  const confirmed = await showConfirm({
+    title: '设置为本地账号',
+    message: '将把该账号凭证写入 TRAE 桌面客户端并自动重启 TRAE 使切换即时生效。\n⚠️ 强制结束 TRAE 进程会丢失未保存的编辑内容，请先在 TRAE 内保存；操作前会自动备份 storage.json。',
+    type: 'warning',
+    confirmText: '确认切换并重启',
+    cancelText: '取消'
+  })
+  if (!confirmed) return
+  const result = await store.setLocalAccount(id)
+  emit('notify',
+    result?.success ? result.message : `切换失败：${result?.message || '未知错误'}`,
+    result?.success ? 'success' : 'error')
+}
+
+function handlePointsDetail(id: string) {
+  const account = store.accounts.find(a => a.id === id)
+  pointsDetailAccountId.value = id
+  pointsDetailAccountName.value = account?.name || ''
+  pointsDetailVisible.value = true
 }
 </script>
 

@@ -22,14 +22,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkinAccount: (id: string) => ipcRenderer.invoke('accounts:checkin', id),
   checkinAll: () => ipcRenderer.invoke('accounts:checkin-all'),
   getAccountPoints: (id: string) => ipcRenderer.invoke('accounts:get-points', id),
+  setLocalAccount: (id: string) => ipcRenderer.invoke('accounts:set-local', id),
+  getPointsDetail: (id: string) => ipcRenderer.invoke('accounts:get-points-detail', id),
 
   // 账号导入导出（JSON 深拷贝穿透 Vue Proxy）
-  exportAccounts: (ids: string[], includeCredentials: boolean) => {
-    const safe = JSON.parse(JSON.stringify({ ids, includeCredentials }))
+  exportAccounts: (ids: string[], includeCredentials: boolean, password: string) => {
+    const safe = JSON.parse(JSON.stringify({ ids, includeCredentials, password }))
     return ipcRenderer.invoke('accounts:export-to-file', safe)
   },
-  importPreview: () => ipcRenderer.invoke('accounts:import-from-file'),
-  importAccounts: (data: { accounts: any[]; strategy: 'skip' | 'overwrite' }) => {
+  pickImportFile: () => ipcRenderer.invoke('accounts:pick-import-file'),
+  importPreview: (filePath: string, password: string) => {
+    const safe = JSON.parse(JSON.stringify({ filePath, password }))
+    return ipcRenderer.invoke('accounts:import-preview', safe)
+  },
+  importAccounts: (data: { filePath: string; password: string; strategy: 'skip' | 'overwrite' }) => {
     const safe = JSON.parse(JSON.stringify(data))
     return ipcRenderer.invoke('accounts:import', safe)
   },

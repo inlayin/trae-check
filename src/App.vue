@@ -125,19 +125,33 @@
     <!-- 导入弹窗 -->
     <ImportModal
       v-model:visible="showImportModal"
-      :accounts="importPreviewData"
-      :invalidCount="importInvalidCount"
+      :filePath="importFilePath"
+      :fileName="importFileName"
+      :hasCredentials="importHasCredentials"
       @imported="handleImported"
     />
 
     <!-- 更新弹窗 -->
     <UpdateModal v-model:visible="showUpdateModal" :info="updateInfo" />
     </div>
+
+    <!-- 全局确认弹窗 -->
+    <ConfirmDialog
+      v-model:visible="confirmVisible"
+      :title="confirmTitle"
+      :message="confirmMessage"
+      :type="confirmType"
+      :confirmText="confirmText"
+      :cancelText="cancelText"
+      :showCancel="confirmShowCancel"
+      @confirm="handleConfirmResult(true)"
+      @cancel="handleConfirmResult(false)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
 import { useAppStore } from './stores/app'
 import AccountList from './components/AccountList.vue'
 import CheckinLog from './components/CheckinLog.vue'
@@ -147,14 +161,16 @@ import ExportModal from './components/ExportModal.vue'
 import ImportModal from './components/ImportModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import AppTitleBar from './components/AppTitleBar.vue'
+import ConfirmDialog, { type ConfirmType } from './components/ConfirmDialog.vue'
 
 const store = useAppStore()
 const activeTab = ref<'accounts' | 'logs' | 'settings'>('accounts')
 const showAddModal = ref(false)
 const showExportModal = ref(false)
 const showImportModal = ref(false)
-const importPreviewData = ref<any[]>([])
-const importInvalidCount = ref(0)
+const importFilePath = ref('')
+const importFileName = ref('')
+const importHasCredentials = ref(false)
 const showUpdateModal = ref(false)
 const updateInfo = ref<{ version: string; releaseNotes: string; releaseDate: string } | null>(null)
 const manualCheck = ref(false)
@@ -186,6 +202,50 @@ function showToast(message: string, type: 'success' | 'error' = 'success') {
   }, 3500)
 }
 
+// ========== 全局确认弹窗 ==========
+const confirmVisible = ref(false)
+const confirmTitle = ref('')
+const confirmMessage = ref('')
+const confirmType = ref<ConfirmType>('info')
+const confirmText = ref('确定')
+const cancelText = ref('取消')
+const confirmShowCancel = ref(true)
+let confirmResolve: ((value: boolean) => void) | null = null
+
+function showConfirm(options: {
+  title: string
+  message?: string
+  type?: ConfirmType
+  confirmText?: string
+  cancelText?: string
+  showCancel?: boolean
+}): Promise<boolean> {
+  confirmTitle.value = options.title
+  confirmMessage.value = options.message || ''
+  confirmType.value = options.type || 'info'
+  confirmText.value = options.confirmText || '确定'
+  cancelText.value = options.cancelText || '取消'
+  confirmShowCancel.value = options.showCancel !== false
+  confirmVisible.value = true
+  return new Promise((resolve) => { confirmResolve = resolve })
+}
+
+function handleConfirmResult(result: boolean) {
+  confirmVisible.value = false
+  confirmResolve?.(result)
+  confirmResolve = null
+}
+
+// 全局 alert（单按钮确认）
+function showAlert(title: string, message?: string, type: ConfirmType = 'info') {
+  return showConfirm({ title, message, type, showCancel: false })
+}
+
+// provide 给子组件
+provide('showConfirm', showConfirm)
+provide('showAlert', showAlert)
+provide('showToast', showToast)
+
 const currentPageTitle = computed(() => {
   switch (activeTab.value) {
     case 'accounts': return '账号管理'
@@ -197,7 +257,7 @@ const currentPageTitle = computed(() => {
 
 async function handleCheckinAll() {
   if (store.enabledAccounts.length === 0) {
-    alert('请先添加并启用账号')
+    void showAlert('提示', '请先添加并启用账号', 'warning')
     return
   }
   await store.checkinAll()
@@ -217,21 +277,17 @@ function handleExportSuccess(filePath?: string) {
 }
 
 async function handleImport() {
-  const result = await store.importPreview()
-  if (result && result.canceled) {
-    // 用户主动取消选文件，不提示错误
+  const pickResult = await store.pickImportFile()
+  if (pickResult && pickResult.canceled) {
     return
   }
-  if (!result || !result.success) {
-    showToast(result?.message || '导入失败', 'error')
+  if (!pickResult || !pickResult.success) {
+    showToast(pickResult?.message || '选择文件失败', 'error')
     return
   }
-  if (!result.accounts || result.accounts.length === 0) {
-    showToast('文件中没有可导入的账号', 'error')
-    return
-  }
-  importPreviewData.value = result.accounts
-  importInvalidCount.value = result.invalidCount || 0
+  importFilePath.value = pickResult.filePath
+  importFileName.value = pickResult.filePath.split(/[\\/]/).pop() || ''
+  importHasCredentials.value = pickResult.hasCredentials
   showImportModal.value = true
 }
 

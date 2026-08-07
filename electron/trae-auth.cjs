@@ -71,4 +71,66 @@ function getTraeDesktopToken(appData) {
   return getTraeDesktopCredentials(appData).token
 }
 
-module.exports = { decryptTraeAuthInfo, getTraeDesktopCredentials, getTraeDesktopToken }
+/**
+ * 把 authInfo payload 重新加密为 TRAE 桌面客户端的 envelope 格式（HEADER + randomKey + AES-128-CBC(SHA512(payload)+payload)）。
+ * 与 decryptTraeAuthInfo 互为逆运算。
+ */
+function encryptTraeAuthInfo(payload) {
+  const payloadBuf = Buffer.from(JSON.stringify(payload), 'utf8')
+  const digest = sha512(payloadBuf)
+  const plaintext = Buffer.concat([digest, payloadBuf])
+  const randomKey = crypto.randomBytes(32)
+  const secret = Buffer.from(LEFT_SECRET.map((byte, index) => byte ^ RIGHT_SECRET[index]))
+  const derived = sha512(Buffer.concat([sha512(randomKey), secret]))
+  const cipher = crypto.createCipheriv('aes-128-cbc', derived.subarray(0, 16), derived.subarray(16, 32))
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  return Buffer.concat([HEADER, randomKey, ciphertext]).toString('base64')
+}
+
+/**
+ * 把指定 credential 写回 TRAE 桌面客户端的 storage.json，使桌面客户端切换到该账号登录态。
+ * 流程：备份原文件 → 读取 → 替换 authInfo 与签名密钥条目 → 原子写入（临时文件 + rename）。
+ * 返回 { backupPath, wroteKeys }。
+ */
+function setTraeDesktopCredentials(credential, appData = process.env.APPDATA) {
+  if (!appData) throw new Error('Windows AppData directory is unavailable')
+  const storagePath = path.join(appData, 'TRAE SOLO CN', 'User', 'globalStorage', 'storage.json')
+  if (!fs.existsSync(storagePath)) throw new Error('TRAE 桌面客户端 storage.json 不存在：' + storagePath)
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = `${storagePath}.trae-check.bak.${timestamp}`
+  fs.copyFileSync(storagePath, backupPath)
+
+  const storage = JSON.parse(fs.readFileSync(storagePath, 'utf8'))
+
+  const authInfo = {
+    token: credential.token,
+    refreshToken: credential.refreshToken,
+    expiredAt: new Date(credential.expiresAt).toISOString(),
+    refreshExpiredAt: new Date(credential.refreshExpiresAt).toISOString(),
+    userId: credential.userId,
+    account: { username: credential.accountName },
+    host: credential.host
+  }
+  storage['iCubeAuthInfo://icube.cloudide'] = encryptTraeAuthInfo(authInfo)
+
+  // 签名密钥：删除所有旧 iCubeAuthInfo://icube-dc:* 条目，写入新账号的密钥
+  const dcPrefix = 'iCubeAuthInfo://icube-dc:'
+  for (const key of Object.keys(storage)) {
+    if (key.startsWith(dcPrefix)) delete storage[key]
+  }
+  const dcKey = `${dcPrefix}${credential.userId}`
+  storage[dcKey] = encryptTraeAuthInfo({
+    privateKeyPEM: credential.privateKeyPEM,
+    publicKeyPEM: credential.publicKeyPEM
+  })
+
+  // 原子写入：先写临时文件再 rename，避免写入中途崩溃损坏原文件
+  const tmpPath = `${storagePath}.trae-check.tmp`
+  fs.writeFileSync(tmpPath, JSON.stringify(storage, null, 2), 'utf8')
+  fs.renameSync(tmpPath, storagePath)
+
+  return { backupPath, wroteKeys: ['iCubeAuthInfo://icube.cloudide', dcKey] }
+}
+
+module.exports = { decryptTraeAuthInfo, getTraeDesktopCredentials, getTraeDesktopToken, encryptTraeAuthInfo, setTraeDesktopCredentials }

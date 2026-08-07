@@ -121,6 +121,20 @@ export function bulkSaveAccounts(accounts: Account[], strategy: ImportStrategy):
   return { imported, skipped }
 }
 
+// 把某账号标记为凭证已过期/无效（跨机器导入解密失败时使用）
+export function markCredentialExpired(id: string): Account | null {
+  const accounts = getAccounts()
+  const index = accounts.findIndex(a => a.id === id)
+  if (index < 0) return null
+  accounts[index] = {
+    ...accounts[index],
+    credentialStatus: 'expired',
+    encryptedCredential: accounts[index].encryptedCredential  // 保留原始值，用户回到本机仍可恢复
+  }
+  getStore().set('accounts', accounts)
+  return accounts[index]
+}
+
 // 日志相关操作
 export function getLogs(limit = 100): CheckinLog[] {
   const logs = getStore().get('logs', [])

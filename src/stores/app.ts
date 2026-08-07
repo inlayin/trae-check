@@ -25,6 +25,22 @@ export interface CheckinLog {
   pointsGained?: number
 }
 
+export interface PointsTransaction {
+  type: 'checkin' | 'usage' | 'gift' | 'other'
+  amount: number
+  description: string
+  timestamp: number
+}
+
+export interface PointsDetailResult {
+  success: boolean
+  message: string
+  source: 'api' | 'local' | 'none'
+  totalPoints?: number
+  transactions?: PointsTransaction[]
+  localCheckinLogs?: CheckinLog[]
+}
+
 export interface AppSettings {
   autoCheckin: boolean
   checkinTime: string
@@ -143,6 +159,14 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function setLocalAccount(id: string) {
+    return await (window as any).electronAPI.setLocalAccount(id)
+  }
+
+  async function getPointsDetail(id: string): Promise<PointsDetailResult> {
+    return await (window as any).electronAPI.getPointsDetail(id)
+  }
+
   async function fetchLogs(limit = 100) {
     try {
       const result = await (window as any).electronAPI.getLogs(limit)
@@ -204,11 +228,12 @@ export const useAppStore = defineStore('app', () => {
 
   // ========== 账号导入导出 ==========
 
-  async function exportAccounts(ids: string[], includeCredentials: boolean) {
+  async function exportAccounts(ids: string[], includeCredentials: boolean, password: string) {
     try {
-      // JSON 深拷贝：彻底解除 Vue Proxy，确保 Electron IPC 可序列化
-      const safe = JSON.parse(JSON.stringify({ ids, includeCredentials }))
-      const result = await (window as any).electronAPI.exportAccounts(safe.ids, safe.includeCredentials)
+      const safeIds = JSON.parse(JSON.stringify(ids))
+      const safeInclude = Boolean(includeCredentials)
+      const safePwd = String(password || '')
+      const result = await (window as any).electronAPI.exportAccounts(safeIds, safeInclude, safePwd)
       return result
     } catch (e) {
       console.error('导出账号失败:', e)
@@ -216,9 +241,19 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function importPreview() {
+  async function pickImportFile() {
     try {
-      const result = await (window as any).electronAPI.importPreview()
+      const result = await (window as any).electronAPI.pickImportFile()
+      return result
+    } catch (e) {
+      console.error('选择导入文件失败:', e)
+      throw e
+    }
+  }
+
+  async function importPreview(filePath: string, password: string) {
+    try {
+      const result = await (window as any).electronAPI.importPreview(filePath, password)
       return result
     } catch (e) {
       console.error('导入预览失败:', e)
@@ -226,11 +261,9 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function importAccounts(accounts: any[], strategy: 'skip' | 'overwrite') {
+  async function importAccounts(filePath: string, password: string, strategy: 'skip' | 'overwrite') {
     try {
-      // JSON 深拷贝：彻底解除 Vue Proxy
-      const safe = JSON.parse(JSON.stringify({ accounts, strategy }))
-      const result = await (window as any).electronAPI.importAccounts(safe)
+      const result = await (window as any).electronAPI.importAccounts({ filePath, password, strategy })
       if (result.success) {
         await fetchAccounts()
       }
@@ -276,6 +309,8 @@ export const useAppStore = defineStore('app', () => {
     checkinAccount,
     checkinAll,
     getAccountPoints,
+    setLocalAccount,
+    getPointsDetail,
     fetchLogs,
     clearLogs,
     fetchSettings,
@@ -283,6 +318,7 @@ export const useAppStore = defineStore('app', () => {
     fetchNextRunTime,
     getCookieFromLoginWindow,
     exportAccounts,
+    pickImportFile,
     importPreview,
     importAccounts,
     init
