@@ -46,17 +46,19 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
         return { success: false, message: '凭证已失效，请重新导入' }
       }
     }
-    const { token, deviceId, host } = credential
+    const { token, deviceId, host, userId } = credential
+    // 为每个账号使用独立的 x-device-id，避免 TRAE 后端基于设备 ID 的每日去重。
+    // TRAE claim 接口会按 x-device-id 做"一设备一天一次"拦截，多账号共享
+    // 同一个 deviceId 时，第一个账号成功后其余账号会被拒绝。这里在原始 deviceId
+    // 后拼接账号 userId，保证同一台机器上不同账号看起来像不同设备。
+    // （refreshCredential 仍使用原始 credential.deviceId，不影响 token 续期）
+    const perAccountDeviceId = userId ? `${deviceId}-${userId}` : deviceId
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': `Cloud-IDE-JWT ${token}`,
-      'x-device-id': deviceId
+      'x-device-id': perAccountDeviceId
     }
 
-    // 直接调用领取接口，跳过 status 预检。
-    // status 接口会基于 x-device-id 判断设备级签到状态，多账号共享同一 deviceId 时
-    // 会导致账号 A 签到后账号 B 被误判为"已签到"。claim 接口靠 JWT 识别用户身份，
-    // 与 TRAE 桌面客户端手动签到一致，不会被 deviceId 误判。
     const claim = await axios.post(`${host}${TRAE_CHECKIN_CLAIM_PATH}`, {}, { headers, timeout: 30000 })
     if (apiSucceeded(claim.data)) {
       return {
@@ -66,24 +68,34 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
       }
     }
 
-    // 领取接口返回失败时，判断是否属于"今日已签到"。
-    // 注意：TRAE 的措辞可能是"已签到""已经签到""明日再来""今日已完成"等，
-    // "已经签到"不含子串"已签到"（中间有"经"字），需要分别匹配。
+    // 领取接口返回失败时，判断是否属于"该账号今日已签到"（不是设备级去重拦截）。
+    // 关键区分：包含"设备"/"device" 等设备级措辞 = 拦截失败；仅包含"已签到"/
+    // "明日再来"/"已领取"等用户级措辞 = 账号自己确实已签到（success=true）。
     const claimMsg = claim.data?.message || claim.data?.msg || ''
     const lowerMsg = claimMsg.toLowerCase()
-    const alreadyChecked =
+    const isDeviceLevelBlock =
+      claimMsg.includes('设备') ||
+      lowerMsg.includes('device') ||
+      lowerMsg.includes('machine')
+    const userAlreadyChecked =
       claim.data?.code === 1001 ||
-      claimMsg.includes('已签到') ||
-      claimMsg.includes('已经签到') ||
-      claimMsg.includes('明日再来') ||
-      claimMsg.includes('今日已完成') ||
-      claimMsg.includes('已领取') ||
-      lowerMsg.includes('already') ||
-      lowerMsg.includes('checked') ||
-      lowerMsg.includes('repeat') ||
-      lowerMsg.includes('claimed')
-    if (alreadyChecked) {
+      (!isDeviceLevelBlock && (
+        claimMsg.includes('已签到') ||
+        claimMsg.includes('已经签到') ||
+        claimMsg.includes('明日再来') ||
+        claimMsg.includes('今日已完成') ||
+        claimMsg.includes('已领取') ||
+        lowerMsg.includes('already') ||
+        lowerMsg.includes('checked') ||
+        lowerMsg.includes('claimed')
+      ))
+    if (userAlreadyChecked) {
       return { success: true, message: '今日已签到' }
+    }
+
+    // 设备级去重提示：说明独立 deviceId 策略仍被识别，作为失败返回以便重试
+    if (isDeviceLevelBlock) {
+      return { success: false, message: claimMsg || '该设备今日签到次数已达上限，请稍后重试或检查账号凭证' }
     }
 
     return { success: false, message: claimMsg || '签到失败' }
