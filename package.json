@@ -38,13 +38,13 @@
   "build": {
     "appId": "com.traecheck.app",
     "productName": "TraeCheck",
+    "artifactName": "TraeCheck-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },
     "publish": {
-      "provider": "github",
-      "owner": "inlayin",
-      "repo": "trae-check"
+      "provider": "generic",
+      "url": "https://gitee.com/inlayin/trae-check/releases/download/latest/"
     },
     "files": [
       "dist",

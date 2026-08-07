@@ -3,6 +3,7 @@ dist
 dist-electron
 release
 release101
+release_gitee
 *.log
 .DS_Store
 .env.local
