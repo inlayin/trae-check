@@ -77,6 +77,21 @@
             <span>{{ store.checkingIn ? '签到中...' : '一键签到全部' }}</span>
           </button>
           <button
+            class="btn btn-outline"
+            @click="handleExport"
+            :disabled="store.accounts.length === 0"
+            v-if="activeTab === 'accounts'"
+          >
+            <span>导出</span>
+          </button>
+          <button
+            class="btn btn-outline"
+            @click="handleImport"
+            v-if="activeTab === 'accounts'"
+          >
+            <span>导入</span>
+          </button>
+          <button
             class="btn btn-primary"
             @click="showAddModal = true"
             v-if="activeTab === 'accounts'"
@@ -101,6 +116,20 @@
       @success="handleAddSuccess"
     />
 
+    <!-- 导出弹窗 -->
+    <ExportModal
+      v-model:visible="showExportModal"
+      @success="handleExportSuccess"
+    />
+
+    <!-- 导入弹窗 -->
+    <ImportModal
+      v-model:visible="showImportModal"
+      :accounts="importPreviewData"
+      :invalidCount="importInvalidCount"
+      @imported="handleImported"
+    />
+
     <!-- 更新弹窗 -->
     <UpdateModal v-model:visible="showUpdateModal" :info="updateInfo" />
     </div>
@@ -114,12 +143,18 @@ import AccountList from './components/AccountList.vue'
 import CheckinLog from './components/CheckinLog.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import AddAccountModal from './components/AddAccountModal.vue'
+import ExportModal from './components/ExportModal.vue'
+import ImportModal from './components/ImportModal.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import AppTitleBar from './components/AppTitleBar.vue'
 
 const store = useAppStore()
 const activeTab = ref<'accounts' | 'logs' | 'settings'>('accounts')
 const showAddModal = ref(false)
+const showExportModal = ref(false)
+const showImportModal = ref(false)
+const importPreviewData = ref<any[]>([])
+const importInvalidCount = ref(0)
 const showUpdateModal = ref(false)
 const updateInfo = ref<{ version: string; releaseNotes: string; releaseDate: string } | null>(null)
 const manualCheck = ref(false)
@@ -170,6 +205,39 @@ async function handleCheckinAll() {
 
 function handleAddSuccess() {
   showAddModal.value = false
+}
+
+function handleExport() {
+  showExportModal.value = true
+}
+
+function handleExportSuccess(filePath?: string) {
+  showExportModal.value = false
+  showToast(filePath ? `已导出到：${filePath}` : '导出成功', 'success')
+}
+
+async function handleImport() {
+  const result = await store.importPreview()
+  if (result && result.canceled) {
+    // 用户主动取消选文件，不提示错误
+    return
+  }
+  if (!result || !result.success) {
+    showToast(result?.message || '导入失败', 'error')
+    return
+  }
+  if (!result.accounts || result.accounts.length === 0) {
+    showToast('文件中没有可导入的账号', 'error')
+    return
+  }
+  importPreviewData.value = result.accounts
+  importInvalidCount.value = result.invalidCount || 0
+  showImportModal.value = true
+}
+
+function handleImported(message: string) {
+  showImportModal.value = false
+  showToast(message, 'success')
 }
 
 onMounted(() => {

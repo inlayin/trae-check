@@ -1,5 +1,5 @@
 import Store from 'electron-store'
-import type { Account, CheckinLog, AppSettings } from './types'
+import type { Account, CheckinLog, AppSettings, ImportStrategy } from './types'
 import { defaultSettings } from './types'
 const { upsertDesktopAccount: mergeDesktopAccount } = require('../electron/desktop-credentials.cjs') as { upsertDesktopAccount: (accounts: Account[], incoming: Account) => Account[] }
 
@@ -67,6 +67,58 @@ export function updateAccount(id: string, updates: Partial<Account>): Account | 
     return accounts[index]
   }
   return null
+}
+
+// 判断导入账号是否与现有账号冲突
+function isConflict(existing: Account[], incoming: Account): boolean {
+  return existing.some(a => {
+    if (a.desktopUserId && incoming.desktopUserId) {
+      return a.desktopUserId === incoming.desktopUserId
+    }
+    return a.name === incoming.name && a.cookie.slice(0, 32) === incoming.cookie.slice(0, 32)
+  })
+}
+
+// 标记导入账号的冲突状态（不写入 store）
+export function checkImportConflicts(incoming: Account[]): (Account & { conflict: boolean })[] {
+  const existing = getAccounts()
+  return incoming.map(a => ({ ...a, conflict: isConflict(existing, a) }))
+}
+
+// 批量导入账号，支持冲突处理策略
+export function bulkSaveAccounts(accounts: Account[], strategy: ImportStrategy): { imported: number; skipped: number } {
+  const existing = getAccounts()
+  let imported = 0
+  let skipped = 0
+
+  for (const account of accounts) {
+    const conflict = isConflict(existing, account)
+    if (conflict && strategy === 'skip') {
+      skipped++
+      continue
+    }
+    if (conflict && strategy === 'overwrite') {
+      // 按 desktopUserId 或 name+cookie 定位并覆盖
+      const index = existing.findIndex(a => {
+        if (a.desktopUserId && account.desktopUserId) {
+          return a.desktopUserId === account.desktopUserId
+        }
+        return a.name === account.name && a.cookie.slice(0, 32) === account.cookie.slice(0, 32)
+      })
+      if (index >= 0) {
+        existing[index] = { ...existing[index], ...account, id: existing[index].id }
+      } else {
+        existing.push(account)
+      }
+    } else {
+      // 无冲突，新增（生成新 id 避免碰撞）
+      existing.push({ ...account, id: Date.now().toString(36) + Math.random().toString(36).substr(2) })
+    }
+    imported++
+  }
+
+  getStore().set('accounts', existing)
+  return { imported, skipped }
 }
 
 // 日志相关操作

@@ -202,6 +202,45 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // ========== 账号导入导出 ==========
+
+  async function exportAccounts(ids: string[], includeCredentials: boolean) {
+    try {
+      // JSON 深拷贝：彻底解除 Vue Proxy，确保 Electron IPC 可序列化
+      const safe = JSON.parse(JSON.stringify({ ids, includeCredentials }))
+      const result = await (window as any).electronAPI.exportAccounts(safe.ids, safe.includeCredentials)
+      return result
+    } catch (e) {
+      console.error('导出账号失败:', e)
+      throw e
+    }
+  }
+
+  async function importPreview() {
+    try {
+      const result = await (window as any).electronAPI.importPreview()
+      return result
+    } catch (e) {
+      console.error('导入预览失败:', e)
+      throw e
+    }
+  }
+
+  async function importAccounts(accounts: any[], strategy: 'skip' | 'overwrite') {
+    try {
+      // JSON 深拷贝：彻底解除 Vue Proxy
+      const safe = JSON.parse(JSON.stringify({ accounts, strategy }))
+      const result = await (window as any).electronAPI.importAccounts(safe)
+      if (result.success) {
+        await fetchAccounts()
+      }
+      return result
+    } catch (e) {
+      console.error('导入账号失败:', e)
+      throw e
+    }
+  }
+
   // 初始化
   async function init() {
     loading.value = true
@@ -243,6 +282,9 @@ export const useAppStore = defineStore('app', () => {
     saveSettings,
     fetchNextRunTime,
     getCookieFromLoginWindow,
+    exportAccounts,
+    importPreview,
+    importAccounts,
     init
   }
 })

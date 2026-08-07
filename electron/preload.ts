@@ -23,6 +23,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkinAll: () => ipcRenderer.invoke('accounts:checkin-all'),
   getAccountPoints: (id: string) => ipcRenderer.invoke('accounts:get-points', id),
 
+  // 账号导入导出（JSON 深拷贝穿透 Vue Proxy）
+  exportAccounts: (ids: string[], includeCredentials: boolean) => {
+    const safe = JSON.parse(JSON.stringify({ ids, includeCredentials }))
+    return ipcRenderer.invoke('accounts:export-to-file', safe)
+  },
+  importPreview: () => ipcRenderer.invoke('accounts:import-from-file'),
+  importAccounts: (data: { accounts: any[]; strategy: 'skip' | 'overwrite' }) => {
+    const safe = JSON.parse(JSON.stringify(data))
+    return ipcRenderer.invoke('accounts:import', safe)
+  },
+
   // 日志相关
   getLogs: (limit?: number) => ipcRenderer.invoke('logs:get', limit),
   clearLogs: () => ipcRenderer.invoke('logs:clear'),

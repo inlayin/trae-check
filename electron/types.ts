@@ -43,6 +43,42 @@ export interface AppSettings {
   }
 }
 
+// 导出文件结构
+export interface ExportData {
+  version: number
+  exportedAt: number
+  appVersion: string
+  containsCredentials: boolean
+  count: number
+  accounts: Account[]
+}
+
+// 导入预览结果
+export interface ImportPreviewResult {
+  success: boolean
+  accounts?: (Account & { conflict: boolean })[]
+  invalidCount?: number
+  message?: string
+}
+
+// 导入执行结果
+export interface ImportResult {
+  success: boolean
+  imported: number
+  skipped: number
+  message?: string
+}
+
+// 导出结果
+export interface ExportResult {
+  success: boolean
+  path?: string
+  message?: string
+}
+
+// 导入冲突处理策略
+export type ImportStrategy = 'skip' | 'overwrite'
+
 // 默认设置
 export const defaultSettings: AppSettings = {
   autoCheckin: false,

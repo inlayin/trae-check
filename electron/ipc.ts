@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow, dialog, safeStorage } from 'electron'
+import { ipcMain, BrowserWindow, dialog, safeStorage, app } from 'electron'
+import fs from 'fs'
 import path from 'path'
 import {
   getAccounts,
@@ -9,11 +10,13 @@ import {
   clearLogs,
   getSettings,
   saveSettings,
-  upsertDesktopAccount
+  upsertDesktopAccount,
+  checkImportConflicts,
+  bulkSaveAccounts
 } from './store'
 import { performCheckin, performAllCheckin, getTotalPointsByTraeDesktop } from './checkin'
 import { startScheduler, stopScheduler, restartScheduler, getNextRunTime } from './scheduler'
-import type { Account, AppSettings } from './types'
+import type { Account, AppSettings, ImportStrategy, ExportData } from './types'
 const { getTraeDesktopCredentials } = require('../electron/trae-auth.cjs') as { getTraeDesktopCredentials: () => any }
 const { encryptCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as { encryptCredential: (credential: any, storage: typeof safeStorage) => string; publicCredentialStatus: (credential: any) => { type: string; credentialStatus: Account['credentialStatus'] } }
 const { registerWindowControls } = require('./window-controls.cjs') as { registerWindowControls: (ipc: typeof ipcMain, getWindow: () => BrowserWindow | null) => void }
@@ -26,6 +29,11 @@ function toPublicAccount(account: Account) {
 // 生成唯一 ID
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2)
+}
+
+// 通过 JSON 编解码清洗对象，确保 IPC 返回值对 Structured Clone 安全
+function cloneSafe<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj))
 }
 
 export function registerIpcHandlers(mainWindow: BrowserWindow) {
@@ -105,6 +113,166 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
       updateAccount(id, { points: result.totalPoints })
     }
     return result
+  })
+
+  // ========== 账号导入导出 ==========
+
+  // 导出账号到文件
+  ipcMain.handle('accounts:export-to-file', async (_event, data: { ids: string[]; includeCredentials: boolean }) => {
+    try {
+      const ids: string[] = Array.isArray(data?.ids) ? data.ids : []
+      const includeCredentials: boolean = !!data?.includeCredentials
+      const allAccounts = getAccounts()
+      const selectedAccounts = allAccounts.filter(a => ids.includes(String(a.id)))
+
+      if (selectedAccounts.length === 0) {
+        return cloneSafe({ success: false, message: '没有选中的账号' })
+      }
+
+      const accountsToExport = selectedAccounts.map(a => {
+        const base = {
+          id: String(a.id),
+          name: String(a.name),
+          cookie: includeCredentials ? String(a.cookie || '') : '',
+          createdAt: typeof a.createdAt === 'number' ? a.createdAt : Date.now(),
+          enabled: a.enabled !== false,
+          desktopUserId: a.desktopUserId ? String(a.desktopUserId) : undefined,
+          credentialStatus: a.credentialStatus ? String(a.credentialStatus) : undefined
+        } as any
+        if (includeCredentials && a.encryptedCredential) {
+          base.encryptedCredential = String(a.encryptedCredential)
+        }
+        return base
+      })
+
+      const exportData = {
+        version: 1,
+        exportedAt: Date.now(),
+        appVersion: String(app.getVersion()),
+        containsCredentials: includeCredentials,
+        count: accountsToExport.length,
+        accounts: accountsToExport
+      }
+
+      const now = new Date()
+      const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+      const defaultFilename = `trae-check-accounts-${dateStr}.json`
+
+      const win = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null as any
+      const dialogResult = await dialog.showSaveDialog(win, {
+        title: '导出账号数据',
+        defaultPath: defaultFilename,
+        filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+      })
+
+      if (dialogResult.canceled || !dialogResult.filePath) {
+        return cloneSafe({ success: false, canceled: true, message: '用户取消导出' })
+      }
+
+      const filePath = String(dialogResult.filePath)
+      fs.writeFileSync(filePath, JSON.stringify(exportData, null, 2), 'utf-8')
+      return cloneSafe({ success: true, path: filePath })
+    } catch (e: any) {
+      const msg = (e && e.message) ? String(e.message) : '导出失败'
+      return cloneSafe({ success: false, message: msg })
+    }
+  })
+
+  // 从文件导入账号（预览）
+  ipcMain.handle('accounts:import-from-file', async () => {
+    try {
+      const win = (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : null as any
+      const openResult = await dialog.showOpenDialog(win, {
+        title: '导入账号数据',
+        filters: [{ name: 'JSON 文件', extensions: ['json'] }],
+        properties: ['openFile']
+      })
+
+      if (openResult.canceled || !openResult.filePaths || openResult.filePaths.length === 0) {
+        return cloneSafe({ success: false, canceled: true, message: '用户取消导入' })
+      }
+
+      const filePath = String(openResult.filePaths[0])
+      const content = fs.readFileSync(filePath, 'utf-8')
+      let data: any
+
+      try {
+        data = JSON.parse(content)
+      } catch {
+        return cloneSafe({ success: false, message: '文件格式无效，无法解析 JSON' })
+      }
+
+      if (typeof data.version !== 'number' || !Array.isArray(data.accounts)) {
+        return cloneSafe({ success: false, message: '文件格式不符合要求（缺少 version 或 accounts 字段）' })
+      }
+
+      const validAccounts: Account[] = []
+      let invalidCount = 0
+      for (const item of data.accounts) {
+        if (item && typeof item.id === 'string' && typeof item.name === 'string') {
+          validAccounts.push({
+            id: String(item.id),
+            name: String(item.name),
+            cookie: item.cookie ? String(item.cookie) : '',
+            createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
+            enabled: item.enabled !== false,
+            desktopUserId: item.desktopUserId ? String(item.desktopUserId) : undefined,
+            encryptedCredential: item.encryptedCredential ? String(item.encryptedCredential) : undefined,
+            credentialStatus: item.credentialStatus ? String(item.credentialStatus) : undefined
+          } as Account)
+        } else {
+          invalidCount++
+        }
+      }
+
+      const accountsWithConflict = checkImportConflicts(validAccounts)
+      const accountsSafe = accountsWithConflict.map(a => ({
+        id: String(a.id),
+        name: String(a.name),
+        cookie: a.cookie ? String(a.cookie) : '',
+        createdAt: typeof a.createdAt === 'number' ? a.createdAt : Date.now(),
+        enabled: a.enabled !== false,
+        desktopUserId: a.desktopUserId ? String(a.desktopUserId) : undefined,
+        encryptedCredential: a.encryptedCredential ? String(a.encryptedCredential) : undefined,
+        credentialStatus: a.credentialStatus ? String(a.credentialStatus) : undefined,
+        conflict: !!a.conflict
+      }))
+
+      return cloneSafe({
+        success: true,
+        accounts: accountsSafe,
+        invalidCount
+      })
+    } catch (e: any) {
+      const msg = (e && e.message) ? String(e.message) : '读取文件失败'
+      return cloneSafe({ success: false, message: msg })
+    }
+  })
+
+  // 执行导入
+  ipcMain.handle('accounts:import', (_event, data: { accounts: Account[]; strategy: ImportStrategy }) => {
+    try {
+      const accounts = Array.isArray(data?.accounts) ? data.accounts : []
+      const strategy = (data?.strategy === 'overwrite') ? 'overwrite' : 'skip'
+      if (accounts.length === 0) {
+        return cloneSafe({ success: false, imported: 0, skipped: 0, message: '没有可导入的账号' })
+      }
+      const cleanedAccounts: Account[] = accounts.map(a => ({
+        id: String(a.id),
+        name: String(a.name),
+        cookie: a.cookie ? String(a.cookie) : '',
+        createdAt: typeof a.createdAt === 'number' ? a.createdAt : Date.now(),
+        enabled: a.enabled !== false,
+        desktopUserId: a.desktopUserId ? String(a.desktopUserId) : undefined,
+        encryptedCredential: a.encryptedCredential ? String(a.encryptedCredential) : undefined,
+        credentialStatus: a.credentialStatus ? String(a.credentialStatus) : undefined
+      } as Account))
+      const result = bulkSaveAccounts(cleanedAccounts, strategy)
+      return cloneSafe({ success: true, ...result })
+    } catch (e: any) {
+      const msg = (e && e.message) ? String(e.message) : '导入失败'
+      return cloneSafe({ success: false, imported: 0, skipped: 0, message: msg })
+    }
   })
 
   // ========== 日志相关 ==========
