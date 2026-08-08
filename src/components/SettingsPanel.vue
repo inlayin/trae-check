@@ -199,14 +199,28 @@
 
     <div class="settings-section card">
       <h3 class="section-title">定时任务状态</h3>
-      <p class="section-desc">查看当前定时任务的运行状态</p>
+      <p class="section-desc">查看当前定时任务的运行状态（每 30 秒自动刷新）</p>
 
       <div class="status-grid">
         <div class="status-item">
           <span class="status-label">自动签到</span>
           <span class="status-value" :class="store.settings?.autoCheckin ? 'active' : 'inactive'">
-            {{ store.settings?.autoCheckin ? '运行中' : '已停止' }}
+            {{ store.settings?.autoCheckin ? '已开启' : '已关闭' }}
           </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">调度器健康</span>
+          <span class="status-value" :class="schedulerRunning ? 'active' : 'inactive'">
+            {{ schedulerRunning ? '运行中' : '未启动' }}
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Cron 表达式</span>
+          <span class="status-value cron-expr">{{ store.schedulerStatus?.cronExpression || '—' }}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">配置签到时间</span>
+          <span class="status-value">{{ store.schedulerStatus?.checkinTime || store.settings?.checkinTime || '—' }}</span>
         </div>
         <div class="status-item">
           <span class="status-label">下次执行</span>
@@ -215,6 +229,14 @@
         <div class="status-item">
           <span class="status-label">启用账号数</span>
           <span class="status-value">{{ store.enabledAccounts.length }} 个</span>
+        </div>
+      </div>
+
+      <div v-if="schedulerMismatchHint" class="tip-box warning scheduler-hint">
+        <div class="tip-icon">⚠️</div>
+        <div class="tip-content">
+          <p class="tip-title">调度器状态不一致</p>
+          <p class="tip-desc">你已开启自动签到，但定时任务未实际启动。请尝试关闭再重新打开"启用自动签到"开关，或重启应用。</p>
         </div>
       </div>
     </div>
@@ -259,7 +281,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 
 const store = useAppStore()
@@ -268,15 +290,56 @@ const emit = defineEmits(['check-update'])
 // 由 vite.config.ts 的 define 注入，值来自 package.json 的 version
 const appVersion = __APP_VERSION__
 
+// 为倒计时文案每秒自增的 "now" 参考时间（避免 nextRunTime 不变但文案卡住的感知问题）
+const tickNow = ref(Date.now())
+let tickTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  tickTimer = setInterval(() => {
+    tickNow.value = Date.now()
+  }, 15 * 1000)
+})
+onUnmounted(() => {
+  if (tickTimer) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
+})
+
+/**
+ * 调度器实际运行状态。
+ * 优先用 schedulerStatus.running（cronJob 真实存在并启动）
+ * 否则兼容 fallback（如果 store 中还没拿到 schedulerStatus，就退化到 settings.autoCheckin）
+ */
+const schedulerRunning = computed<boolean>(() => {
+  if (store.schedulerStatus) return !!store.schedulerStatus.running
+  return !!store.settings?.autoCheckin
+})
+
+/**
+ * 设置显示了 autoCheckin=true，但调度器实际上未启动 → 显示不一致警告
+ */
+const schedulerMismatchHint = computed<boolean>(() => {
+  return !!store.settings?.autoCheckin && store.schedulerStatus !== null && !store.schedulerStatus.running
+})
+
 const nextRunText = computed(() => {
   if (!store.settings?.autoCheckin) return '未启用'
+  // 调度器未启动，给出明确提示而不是 "计算中..."
+  if (store.schedulerStatus && !store.schedulerStatus.running) return '调度器未启动'
   if (!store.nextRunTime) return '计算中...'
 
-  const nextTime = new Date(store.nextRunTime)
-  const now = new Date()
-  const diff = nextTime.getTime() - now.getTime()
+  const nextTime = new Date(store.nextRunTime).getTime()
+  // 使用 tickNow，保证倒计时实时推进，即使 nextRunTime 30s 才刷新一次
+  const now = tickNow.value
+  const diff = nextTime - now
 
-  if (diff <= 0) return '即将执行'
+  // 到点但还没触发（5 分钟内的容差）
+  if (diff <= 0 && diff > -5 * 60 * 1000) return '待触发 / 即将执行'
+  // 超过 5 分钟仍未触发：可能上一轮执行超过窗口
+  if (diff <= 0) {
+    const overdueMin = Math.round(-diff / 60000)
+    return `已过 ${overdueMin} 分钟`
+  }
 
   const hours = Math.floor(diff / 3600000)
   const minutes = Math.floor((diff % 3600000) / 60000)
@@ -595,6 +658,16 @@ function formatJson(obj?: Record<string, any>): string {
 
 .status-value.inactive {
   color: var(--text-muted);
+}
+
+.cron-expr {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+.scheduler-hint {
+  margin-top: 16px;
 }
 
 /* 关于 */

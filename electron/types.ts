@@ -51,7 +51,7 @@ export interface AppSettings {
   retryDelay: number // 重试间隔（秒）
   notifyOnSuccess: boolean // 签到成功通知
   notifyOnFailed: boolean // 签到失败通知
-  checkinMode: 'webview' | 'api' // 签到模式
+  checkinMode: 'desktop' | 'webview' | 'api' // 签到模式：desktop=TRAE桌面凭证(推荐)，webview=浏览器模拟，api=自定义API
   apiConfig?: {
     // API 模式配置（用户自行抓包填写）
     checkinUrl: string
@@ -133,5 +133,5 @@ export const defaultSettings: AppSettings = {
   retryDelay: 60,
   notifyOnSuccess: true,
   notifyOnFailed: true,
-  checkinMode: 'webview'
+  checkinMode: 'desktop' // 默认使用 TRAE 桌面凭证 API 直连，避免 Webview 页面结构变化导致失效
 }

@@ -157,7 +157,32 @@ export function clearLogs(): void {
 
 // 设置相关操作
 export function getSettings(): AppSettings {
-  return getStore().get('settings', defaultSettings)
+  const storeInstance = getStore()
+  const settings = storeInstance.get('settings', defaultSettings) as AppSettings
+
+  // 设置版本迁移：旧版默认 checkinMode='webview'，该模式依赖页面 DOM 结构，
+  // 现已失效（TRAE 页面结构变更导致找不到签到按钮）。
+  // 自动迁移到更稳定的 'desktop' 模式（TRAE 桌面凭证 API 直连）。
+  // 只有当用户没有显式配置自定义 API 时才执行迁移，避免覆盖用户的自定义 API 设置。
+  let migrated = false
+  if (!settings.checkinMode || settings.checkinMode === 'webview') {
+    if (!settings.apiConfig || !settings.apiConfig.checkinUrl) {
+      settings.checkinMode = 'desktop'
+      migrated = true
+    }
+  }
+  // 类型兼容：确保 checkinMode 是有效值
+  const validModes: Array<AppSettings['checkinMode']> = ['desktop', 'webview', 'api']
+  if (!validModes.includes(settings.checkinMode)) {
+    settings.checkinMode = 'desktop'
+    migrated = true
+  }
+  if (migrated) {
+    storeInstance.set('settings', settings)
+    console.log('[Store] 已自动迁移签到模式为 desktop（API直连模式）')
+  }
+
+  return settings
 }
 
 export function saveSettings(settings: Partial<AppSettings>): AppSettings {

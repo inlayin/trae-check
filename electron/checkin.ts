@@ -480,23 +480,29 @@ function generateId(): string {
  */
 export async function checkinByWebview(account: Account): Promise<{ success: boolean; message: string; points?: number }> {
   return new Promise((resolve) => {
-    const settings = getSettings()
     let resolved = false
 
     // 创建隐藏的 BrowserView
-    const view = new BrowserView({
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        partition: `persist:trae-${account.id}`
-      }
-    })
+    let view: BrowserView | null = null
+    try {
+      view = new BrowserView({
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          partition: `persist:trae-${account.id}`
+        }
+      })
+    } catch (e: any) {
+      console.error('[Checkin][Webview] 创建 BrowserView 失败:', e)
+      resolve({ success: false, message: '创建浏览器视图失败: ' + (e?.message || e) })
+      return
+    }
 
     // 设置 cookie
-    if (account.cookie) {
+    if (account.cookie && view) {
       const cookies = parseCookieString(account.cookie)
       cookies.forEach(cookie => {
-        view.webContents.session.cookies.set({
+        view!.webContents.session.cookies.set({
           url: 'https://work.trae.cn',
           name: cookie.name,
           value: cookie.value,
@@ -517,6 +523,34 @@ export async function checkinByWebview(account: Account): Promise<{ success: boo
 
     function cleanup() {
       clearTimeout(timeout)
+      // 核心修复：销毁 BrowserView 及其 webContents，避免内存泄漏阻塞 Node 事件循环
+      if (view) {
+        const wc = view.webContents
+        try {
+          // 1. 先停止任何正在加载的资源
+          if (wc && !wc.isDestroyed()) {
+            try { wc.stop() } catch { /* ignore */ }
+          }
+          // 2. 关闭 webContents（触发销毁流程，.close 是 WebContents 内部方法）
+          if (wc && typeof (wc as any).close === 'function' && !wc.isDestroyed()) {
+            try { (wc as any).close() } catch { /* ignore */ }
+          }
+          // 3. 兜底：显式 destroy（Electron 公开类型未声明，但运行时实际可用）
+          if (wc && typeof (wc as any).destroy === 'function' && !wc.isDestroyed()) {
+            try { (wc as any).destroy() } catch { /* ignore */ }
+          }
+        } catch (e) {
+          console.warn('[Checkin][Webview] cleanup 销毁 webContents 异常:', e)
+        }
+        // 解除引用，帮助 GC
+        view = null
+      }
+    }
+
+    if (!view) {
+      cleanup()
+      resolve({ success: false, message: '浏览器视图未初始化' })
+      return
     }
 
     // 页面加载完成后执行签到逻辑
@@ -526,7 +560,7 @@ export async function checkinByWebview(account: Account): Promise<{ success: boo
         await sleep(3000)
 
         // 注入 JS 查找并点击签到按钮
-        const result = await view.webContents.executeJavaScript(`
+        const result = await view!.webContents.executeJavaScript(`
           (function() {
             // 尝试多种选择器查找签到按钮
             const selectors = [
@@ -582,7 +616,7 @@ export async function checkinByWebview(account: Account): Promise<{ success: boo
         if (!result.found) {
           // 尝试在更多位置查找，比如弹窗、侧边栏等
           await sleep(2000)
-          const result2 = await view.webContents.executeJavaScript(`
+          const result2 = await view!.webContents.executeJavaScript(`
             (function() {
               // 查找所有包含"签到"的元素
               const allElements = document.querySelectorAll('*');
@@ -622,10 +656,9 @@ export async function checkinByWebview(account: Account): Promise<{ success: boo
         await sleep(3000)
 
         // 检查签到结果
-        const checkResult = await view.webContents.executeJavaScript(`
+        const checkResult = await view!.webContents.executeJavaScript(`
           (function() {
             // 查找成功提示
-            const successTexts = ['签到成功', '签到完成', '+200', '获得', '积分'];
             const allElements = document.querySelectorAll('*');
 
             for (const el of allElements) {
@@ -669,6 +702,16 @@ export async function checkinByWebview(account: Account): Promise<{ success: boo
           cleanup()
           resolve({ success: false, message: '签到执行出错: ' + (err.message || err) })
         }
+      }
+    })
+
+    // 加载失败兜底
+    view.webContents.on('did-fail-load', (_event, _errCode, errDescription, _validatedURL, isMainFrame) => {
+      if (!isMainFrame) return
+      if (!resolved) {
+        resolved = true
+        cleanup()
+        resolve({ success: false, message: '页面加载失败: ' + (errDescription || 'unknown') })
       }
     })
 
@@ -747,9 +790,19 @@ export async function performCheckin(account: Account): Promise<{ success: boole
   const settings = getSettings()
   let result: { success: boolean; message: string; points?: number }
 
-  if (settings.checkinMode === 'api' && settings.apiConfig) {
+  // 优先判断 desktop 模式：使用 TRAE 桌面凭证 API 直连（推荐、最稳定）
+  if (settings.checkinMode === 'desktop' || !settings.checkinMode) {
+    console.log(`[Checkin] 账号(${account.name})使用 TraeDesktop 模式签到（API直连）`)
+    result = await checkinByTraeDesktop(account)
+  } else if (settings.checkinMode === 'api' && settings.apiConfig) {
+    console.log(`[Checkin] 账号(${account.name})使用自定义 API 模式签到`)
     result = await checkinByApi(account, settings)
+  } else if (settings.checkinMode === 'webview') {
+    console.log(`[Checkin] 账号(${account.name})使用 Webview 模式签到（已不推荐）`)
+    result = await checkinByWebview(account)
   } else {
+    // 兜底：TRAE 桌面凭证
+    console.log(`[Checkin] 账号(${account.name})兜底使用 TraeDesktop 模式签到`)
     result = await checkinByTraeDesktop(account)
   }
 
@@ -776,6 +829,7 @@ export async function performCheckin(account: Account): Promise<{ success: boole
 
 /**
  * 执行所有启用的账号签到
+ * ⚠️ 无论签到成功与否，都会在最后统一刷新每个账号的总积分写入 store，保证前端展示最新值。
  */
 export async function performAllCheckin(): Promise<Array<{ account: Account; result: { success: boolean; message: string; points?: number } }>> {
   const accounts = getAccounts().filter((a: Account) => a.enabled)
@@ -809,6 +863,26 @@ export async function performAllCheckin(): Promise<Array<{ account: Account; res
     // 账号之间间隔
     await sleep(2000)
   }
+
+  // ========== 统一刷新总积分（无论签到成功与否） ==========
+  console.log(`[Checkin] 全部账号签到结束，开始刷新 ${accounts.length} 个账号的总积分（无论成败）`)
+  for (const account of accounts) {
+    try {
+      const pointsResult = await getTotalPointsByTraeDesktop(account)
+      if (pointsResult.success && typeof pointsResult.totalPoints === 'number') {
+        updateAccount(account.id, { points: pointsResult.totalPoints })
+        console.log(`  [积分刷新] ✅ ${account.name}: ${pointsResult.totalPoints} 分`)
+      } else {
+        // 即使刷新失败，也只是打日志，不影响签到结果
+        console.log(`  [积分刷新] ⚠️  ${account.name}: ${pointsResult.message || '刷新失败，保留原值'}`)
+      }
+    } catch (e: any) {
+      console.warn(`  [积分刷新] ❌ ${account.name} 刷新积分异常:`, e?.message || e)
+    }
+    // 刷新之间也加间隔，避免请求过于密集（TRAE 可能限流）
+    await sleep(800)
+  }
+  console.log('[Checkin] 总积分刷新流程完成')
 
   return results
 }

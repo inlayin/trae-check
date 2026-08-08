@@ -6,11 +6,11 @@
   "author": "trae-check",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
+    "dev": "chcp 65001 >nul 2>&1 & vite",
     "build": "vue-tsc --noEmit && vite build && electron-builder",
     "build:dir": "vue-tsc --noEmit && vite build && electron-builder --dir",
-    "preview": "vite preview",
-    "electron:dev": "vite --mode electron",
+    "preview": "chcp 65001 >nul 2>&1 & vite preview",
+    "electron:dev": "chcp 65001 >nul 2>&1 & vite --mode electron",
     "electron:build": "vite build && electron-builder"
   },
   "dependencies": {

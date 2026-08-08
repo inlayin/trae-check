@@ -48,13 +48,21 @@ export interface AppSettings {
   retryDelay: number
   notifyOnSuccess: boolean
   notifyOnFailed: boolean
-  checkinMode: 'webview' | 'api'
+  checkinMode: 'desktop' | 'webview' | 'api'
   apiConfig?: {
     checkinUrl: string
     method: 'GET' | 'POST'
     headers: Record<string, string>
     body?: Record<string, any>
   }
+}
+
+export interface SchedulerStatus {
+  running: boolean
+  autoCheckin: boolean
+  checkinTime: string
+  cronExpression: string
+  nextRunISO: string | null
 }
 
 export const useAppStore = defineStore('app', () => {
@@ -65,6 +73,7 @@ export const useAppStore = defineStore('app', () => {
   const loading = ref(false)
   const checkingIn = ref(false)
   const nextRunTime = ref<string | null>(null)
+  const schedulerStatus = ref<SchedulerStatus | null>(null)
 
   // 计算属性
   const enabledAccounts = computed(() => accounts.value.filter(a => a.enabled))
@@ -200,6 +209,7 @@ export const useAppStore = defineStore('app', () => {
       const result = await (window as any).electronAPI.saveSettings(newSettings)
       settings.value = result
       await fetchNextRunTime()
+      await fetchSchedulerStatus()
       return result
     } catch (e) {
       console.error('保存设置失败:', e)
@@ -213,6 +223,19 @@ export const useAppStore = defineStore('app', () => {
       nextRunTime.value = result
     } catch (e) {
       console.error('获取下次执行时间失败:', e)
+    }
+  }
+
+  async function fetchSchedulerStatus() {
+    try {
+      const result = await (window as any).electronAPI.getSchedulerStatus()
+      schedulerStatus.value = result
+      // 顺便同步 nextRunTime（如果有更准确的 ISO 时间）
+      if (result?.nextRunISO) {
+        nextRunTime.value = result.nextRunISO
+      }
+    } catch (e) {
+      console.error('获取调度器状态失败:', e)
     }
   }
 
@@ -282,7 +305,8 @@ export const useAppStore = defineStore('app', () => {
         fetchAccounts(),
         fetchLogs(),
         fetchSettings(),
-        fetchNextRunTime()
+        fetchNextRunTime(),
+        fetchSchedulerStatus()
       ])
     } finally {
       loading.value = false
@@ -297,6 +321,7 @@ export const useAppStore = defineStore('app', () => {
     loading,
     checkingIn,
     nextRunTime,
+    schedulerStatus,
     // 计算属性
     enabledAccounts,
     todayCheckedCount,
@@ -316,6 +341,7 @@ export const useAppStore = defineStore('app', () => {
     fetchSettings,
     saveSettings,
     fetchNextRunTime,
+    fetchSchedulerStatus,
     getCookieFromLoginWindow,
     exportAccounts,
     pickImportFile,

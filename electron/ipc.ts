@@ -16,7 +16,7 @@ import {
   markCredentialExpired
 } from './store'
 import { performCheckin, performAllCheckin, getTotalPointsByTraeDesktop, getPointsDetailByTraeDesktop } from './checkin'
-import { startScheduler, stopScheduler, restartScheduler, getNextRunTime } from './scheduler'
+import { startScheduler, stopScheduler, restartScheduler, getNextRunTime, getSchedulerStatus } from './scheduler'
 import type { Account, AppSettings, ImportStrategy, ExportData, ExportAccount } from './types'
 const { getTraeDesktopCredentials, setTraeDesktopCredentials } = require('../electron/trae-auth.cjs') as {
   getTraeDesktopCredentials: () => any
@@ -461,7 +461,17 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
   // 获取下次执行时间
   ipcMain.handle('scheduler:next-run', () => {
     const next = getNextRunTime()
-    return next ? next.toISOString() : null
+    const result = next ? next.toISOString() : null
+    console.log('[IPC] scheduler:next-run ->', result)
+    return result
+  })
+
+  // 获取调度器完整健康状态（用于前端诊断面板）
+  ipcMain.handle('scheduler:status', () => {
+    const status = getSchedulerStatus()
+    console.log('[IPC] scheduler:status ->', JSON.stringify(status))
+    // 保证 Structured Clone 安全
+    return JSON.parse(JSON.stringify(status))
   })
 
   // 启动/停止定时任务

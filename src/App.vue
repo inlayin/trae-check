@@ -68,6 +68,15 @@
         </div>
         <div class="top-bar-right">
           <button
+            class="btn btn-outline"
+            @click="handleRefresh"
+            :disabled="refreshing"
+            v-if="activeTab === 'accounts'"
+          >
+            <span v-if="refreshing" class="spinner"></span>
+            <span>{{ refreshing ? '刷新中...' : '刷新' }}</span>
+          </button>
+          <button
             class="btn btn-primary"
             @click="handleCheckinAll"
             :disabled="store.checkingIn || store.enabledAccounts.length === 0"
@@ -165,6 +174,7 @@ import ConfirmDialog, { type ConfirmType } from './components/ConfirmDialog.vue'
 
 const store = useAppStore()
 const activeTab = ref<'accounts' | 'logs' | 'settings'>('accounts')
+const refreshing = ref(false)
 const showAddModal = ref(false)
 const showExportModal = ref(false)
 const showImportModal = ref(false)
@@ -179,6 +189,8 @@ let unsubAvailable: (() => void) | undefined
 let unsubNotAvailable: (() => void) | undefined
 let unsubError: (() => void) | undefined
 let unsubDownloaded: (() => void) | undefined
+let schedulerPollTimer: ReturnType<typeof setInterval> | null = null
+let lastNextRunISO: string | null = null
 
 function checkForUpdates(manual: boolean) {
   manualCheck.value = manual
@@ -263,6 +275,23 @@ async function handleCheckinAll() {
   await store.checkinAll()
 }
 
+async function handleRefresh() {
+  refreshing.value = true
+  try {
+    await Promise.all([
+      store.fetchAccounts(),
+      store.fetchLogs(),
+      store.fetchSchedulerStatus()
+    ])
+    showToast('数据已刷新', 'success')
+  } catch (e) {
+    console.error('[App] 刷新数据失败:', e)
+    showToast('刷新数据失败', 'error')
+  } finally {
+    refreshing.value = false
+  }
+}
+
 function handleAddSuccess() {
   showAddModal.value = false
 }
@@ -296,6 +325,37 @@ function handleImported(message: string) {
   showToast(message, 'success')
 }
 
+/**
+ * 每 15s 轮询调度器状态 + 下次执行时间，解决 UI 显示"X 分钟后"但倒计时卡住的感知问题。
+ * 如果检测到 nextRunISO 发生"跳变"（如签到完成后推到明天），则立即刷新账号/日志状态。
+ * 刷新账号列表时会把本次签到后主进程最新写入的总积分（无论签到成败都会刷）同步到前端。
+ */
+async function pollSchedulerHealth() {
+  try {
+    await store.fetchSchedulerStatus()
+    await store.fetchNextRunTime()
+  } catch (e) {
+    console.warn('[App] 轮询调度器状态异常:', e)
+  }
+
+  // 判断是否发生了签到执行（nextRun 跳变超过 1 小时或日期变化 = 签到任务已执行过）
+  const current = store.nextRunTime
+  if (lastNextRunISO && current && lastNextRunISO !== current) {
+    const prev = new Date(lastNextRunISO).getTime()
+    const now = new Date(current).getTime()
+    const diffHours = Math.abs(now - prev) / 3600000
+    const differentDay = new Date(lastNextRunISO).getDate() !== new Date(current).getDate()
+    if (diffHours > 1 || differentDay) {
+      console.log(`[App] 检测到 nextRun 跳变 (${lastNextRunISO} -> ${current})，自动刷新账号/日志（含总积分）`)
+      await Promise.all([
+        store.fetchAccounts(),
+        store.fetchLogs()
+      ])
+    }
+  }
+  lastNextRunISO = current
+}
+
 onMounted(() => {
   store.init()
   console.log('[App] onMounted, 注册更新监听器')
@@ -323,6 +383,14 @@ onMounted(() => {
       showToast('更新已就绪，下次退出时自动安装', 'success')
     }
   })
+
+  // 初始化轮询基准值
+  lastNextRunISO = store.nextRunTime
+
+  // 启动调度器健康轮询（每 15 秒，仅主窗口打开时执行）
+  schedulerPollTimer = setInterval(() => {
+    void pollSchedulerHealth()
+  }, 15 * 1000)
 })
 
 onUnmounted(() => {
@@ -330,6 +398,10 @@ onUnmounted(() => {
   unsubNotAvailable?.()
   unsubError?.()
   unsubDownloaded?.()
+  if (schedulerPollTimer) {
+    clearInterval(schedulerPollTimer)
+    schedulerPollTimer = null
+  }
 })
 </script>
 

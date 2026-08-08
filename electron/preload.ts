@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 定时任务
   getNextRunTime: () => ipcRenderer.invoke('scheduler:next-run'),
+  getSchedulerStatus: () => ipcRenderer.invoke('scheduler:status'),
   startScheduler: () => ipcRenderer.invoke('scheduler:start'),
   stopScheduler: () => ipcRenderer.invoke('scheduler:stop'),
 
