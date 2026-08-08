@@ -1,7 +1,8 @@
 import Store from 'electron-store'
 import type { Account, CheckinLog, AppSettings, ImportStrategy } from './types'
 import { defaultSettings } from './types'
-const { upsertDesktopAccount: mergeDesktopAccount } = require('../electron/desktop-credentials.cjs') as { upsertDesktopAccount: (accounts: Account[], incoming: Account) => Account[] }
+import { requireCjs } from './require-cjs'
+const { upsertDesktopAccount: mergeDesktopAccount } = requireCjs('desktop-credentials.cjs') as { upsertDesktopAccount: (accounts: Account[], incoming: Account) => Account[] }
 
 // 数据存储 schema
 interface StoreSchema {

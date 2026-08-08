@@ -4,8 +4,16 @@ import { execSync } from 'child_process'
 import { initStore } from './store'
 import { registerIpcHandlers } from './ipc'
 import { startScheduler } from './scheduler'
-import { createWindowLifecycle } from './window-lifecycle.cjs'
+import { requireCjs } from './require-cjs'
 import { initAutoUpdater } from './updater'
+
+const { createWindowLifecycle } = requireCjs<{
+  createWindowLifecycle: (getMainWindow: () => BrowserWindow | null, onExit: () => void) => {
+    handleClose: (e: any) => void
+    showWindow: () => void
+    exit: () => void
+  }
+}>('window-lifecycle.cjs')
 
 // 修复 Windows 控制台中文乱码：切换代码页为 UTF-8 (65001)
 if (process.platform === 'win32') {

@@ -3,14 +3,15 @@ import path from 'path'
 import axios from 'axios'
 import type { Account, AppSettings, PointsTransaction, PointsDetailResult } from './types'
 import { updateAccount, addLog, getSettings, markCredentialExpired, getAccounts } from './store'
-const { decryptCredential, legacyCredentialReimportMessage, encryptCredential, refreshCredential, publicCredentialStatus } = require('../electron/desktop-credentials.cjs') as {
+import { requireCjs } from './require-cjs'
+const { decryptCredential, legacyCredentialReimportMessage, encryptCredential, refreshCredential, publicCredentialStatus } = requireCjs('desktop-credentials.cjs') as {
   decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean; legacyCredential?: boolean }
   legacyCredentialReimportMessage: () => string
   encryptCredential: (value: any, storage: typeof safeStorage) => string
   refreshCredential: (value: any) => Promise<any>
   publicCredentialStatus: (value: any) => { credentialStatus: 'valid' | 'expiring' | 'expired' }
 }
-const { extractEntitlementDetails } = require('../electron/points-entitlement-detail.cjs') as {
+const { extractEntitlementDetails } = requireCjs('points-entitlement-detail.cjs') as {
   extractEntitlementDetails: (data: any) => { totalPoints: number; transactions: PointsTransaction[] } | null
 }
 

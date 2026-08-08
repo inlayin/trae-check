@@ -18,12 +18,13 @@ import {
 import { performCheckin, performAllCheckin, getTotalPointsByTraeDesktop, getPointsDetailByTraeDesktop } from './checkin'
 import { startScheduler, stopScheduler, restartScheduler, getNextRunTime, getSchedulerStatus } from './scheduler'
 import type { Account, AppSettings, ImportStrategy, ExportData, ExportAccount } from './types'
-const { getTraeDesktopCredentials, setTraeDesktopCredentials } = require('../electron/trae-auth.cjs') as {
+import { requireCjs } from './require-cjs'
+const { getTraeDesktopCredentials, setTraeDesktopCredentials } = requireCjs('trae-auth.cjs') as {
   getTraeDesktopCredentials: () => any
   setTraeDesktopCredentials: (credential: any, appData?: string) => { backupPath: string; wroteKeys: string[] }
 }
-const { restartTraeDesktop } = require('../electron/trae-process.cjs') as { restartTraeDesktop: () => Promise<{ launched: boolean; message: string; executablePath?: string }> }
-const { encryptCredential, decryptCredential, legacyCredentialReimportMessage, publicCredentialStatus, encryptWithPassword, decryptWithPassword } = require('../electron/desktop-credentials.cjs') as {
+const { restartTraeDesktop } = requireCjs('trae-process.cjs') as { restartTraeDesktop: () => Promise<{ launched: boolean; message: string; executablePath?: string }> }
+const { encryptCredential, decryptCredential, legacyCredentialReimportMessage, publicCredentialStatus, encryptWithPassword, decryptWithPassword } = requireCjs('desktop-credentials.cjs') as {
   encryptCredential: (credential: any, storage: typeof safeStorage) => string
   decryptCredential: (value: string, storage: typeof safeStorage) => { payload: any; decryptionFailed: boolean; legacyCredential?: boolean }
   legacyCredentialReimportMessage: () => string
@@ -31,7 +32,7 @@ const { encryptCredential, decryptCredential, legacyCredentialReimportMessage, p
   encryptWithPassword: (plaintext: string, password: string) => string
   decryptWithPassword: (base64Data: string, password: string) => string
 }
-const { registerWindowControls } = require('./window-controls.cjs') as { registerWindowControls: (ipc: typeof ipcMain, getWindow: () => BrowserWindow | null) => void }
+const { registerWindowControls } = requireCjs('window-controls.cjs') as { registerWindowControls: (ipc: typeof ipcMain, getWindow: () => BrowserWindow | null) => void }
 
 function toPublicAccount(account: Account) {
   const { encryptedCredential, ...publicAccount } = account
@@ -144,7 +145,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow) {
     // 临过期自动续期，避免写回一个已过期的 token
     if (credential.expiresAt - Date.now() <= 5 * 60 * 1000) {
       try {
-        const { refreshCredential } = require('../electron/desktop-credentials.cjs')
+        const { refreshCredential } = requireCjs('desktop-credentials.cjs')
         credential = await refreshCredential(credential)
         updateAccount(id, {
           encryptedCredential: encryptCredential(credential, safeStorage),
