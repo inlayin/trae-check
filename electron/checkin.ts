@@ -14,6 +14,9 @@ const { decryptCredential, legacyCredentialReimportMessage, encryptCredential, r
 const { extractEntitlementDetails } = requireCjs('points-entitlement-detail.cjs') as {
   extractEntitlementDetails: (data: any) => { totalPoints: number; transactions: PointsTransaction[] } | null
 }
+const { classifyCheckinClaim } = requireCjs('checkin-response.cjs') as {
+  classifyCheckinClaim: (data: any) => { kind: 'success' | 'already' | 'transient' | 'device_blocked' | 'failed'; message: string; points?: number; code?: any }
+}
 
 const TRAE_CHECKIN_CLAIM_PATH = '/trae/api/v2/ug/checkin_credits/claim'
 const TRAE_CREDITS_BALANCE_PATHS = [
@@ -40,7 +43,7 @@ const TRAE_CREDITS_TRANSACTION_PATHS: Array<{ method: 'GET' | 'POST'; path: stri
   { method: 'GET', path: '/trae/api/v2/pay/user_credit_history' }
 ]
 
-type CheckinResult = { success: boolean; message: string; points?: number }
+type CheckinResult = { success: boolean; message: string; points?: number; transient?: boolean }
 
 function apiSucceeded(data: any): boolean {
   return data?.code === 0 || data?.code === 200 || data?.success === true || data?.status === 'success'
@@ -84,45 +87,24 @@ export async function checkinByTraeDesktop(account: Account): Promise<CheckinRes
     }
 
     const claim = await axios.post(`${host}${TRAE_CHECKIN_CLAIM_PATH}`, {}, { headers, timeout: 30000 })
-    if (apiSucceeded(claim.data)) {
+    const verdict = classifyCheckinClaim(claim.data)
+    if (verdict.kind === 'success') {
       return {
         success: true,
-        message: claim.data?.message === 'success' || claim.data?.msg === 'success' ? '签到成功' : (claim.data?.message || claim.data?.msg || '签到成功'),
-        points: claim.data?.data?.points || claim.data?.points || 200
+        message: verdict.message,
+        points: verdict.points
       }
     }
-
-    // 领取接口返回失败时，判断是否属于"该账号今日已签到"（不是设备级去重拦截）。
-    // 关键区分：包含"设备"/"device" 等设备级措辞 = 拦截失败；仅包含"已签到"/
-    // "明日再来"/"已领取"等用户级措辞 = 账号自己确实已签到（success=true）。
-    const claimMsg = claim.data?.message || claim.data?.msg || ''
-    const lowerMsg = claimMsg.toLowerCase()
-    const isDeviceLevelBlock =
-      claimMsg.includes('设备') ||
-      lowerMsg.includes('device') ||
-      lowerMsg.includes('machine')
-    const userAlreadyChecked =
-      claim.data?.code === 1001 ||
-      (!isDeviceLevelBlock && (
-        claimMsg.includes('已签到') ||
-        claimMsg.includes('已经签到') ||
-        claimMsg.includes('明日再来') ||
-        claimMsg.includes('今日已完成') ||
-        claimMsg.includes('已领取') ||
-        lowerMsg.includes('already') ||
-        lowerMsg.includes('checked') ||
-        lowerMsg.includes('claimed')
-      ))
-    if (userAlreadyChecked) {
+    if (verdict.kind === 'already') {
       return { success: true, message: '今日已签到' }
     }
-
-    // 设备级去重提示：说明独立 deviceId 策略仍被识别，作为失败返回以便重试
-    if (isDeviceLevelBlock) {
-      return { success: false, message: claimMsg || '该设备今日签到次数已达上限，请稍后重试或检查账号凭证' }
+    // 服务端容量/排队限流（如 code 9074"参与用户太多"）：当天稍后重试通常可成功，
+    // 由调度器接管同日重试，避免每日一次的 cron 撞上限流后直接丢掉当天签到。
+    if (verdict.kind === 'transient') {
+      return { success: false, message: verdict.message, transient: true }
     }
 
-    return { success: false, message: claimMsg || '签到失败' }
+    return { success: false, message: verdict.message }
   } catch (err: any) {
     return { success: false, message: 'TRAE 桌面端签到失败: ' + (err.response?.data?.message || err.message || err) }
   }
@@ -829,11 +811,16 @@ export async function performCheckin(account: Account): Promise<{ success: boole
 }
 
 /**
- * 执行所有启用的账号签到
+ * 执行所有启用的账号签到。
+ * @param only 可选：只签到这些账号（调度器的同日限流重试使用）
  * ⚠️ 无论签到成功与否，都会在最后统一刷新每个账号的总积分写入 store，保证前端展示最新值。
  */
-export async function performAllCheckin(): Promise<Array<{ account: Account; result: { success: boolean; message: string; points?: number } }>> {
-  const accounts = getAccounts().filter((a: Account) => a.enabled)
+export async function performAllCheckin(only?: Array<Account>): Promise<Array<{ account: Account; result: { success: boolean; message: string; points?: number; transient?: boolean } }>> {
+  let accounts = getAccounts().filter((a: Account) => a.enabled)
+  if (only && only.length > 0) {
+    const ids = new Set(only.map((a: Account) => a.id))
+    accounts = accounts.filter((a: Account) => ids.has(a.id))
+  }
   const results: Array<{ account: Account; result: any }> = []
 
   for (const account of accounts) {
