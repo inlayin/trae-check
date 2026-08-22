@@ -1,11 +1,20 @@
 import cron from 'node-cron'
 import { Notification } from 'electron'
 import { getSettings, getAccounts } from './store'
-import { performAllCheckin } from './checkin'
+import { performAllCheckin, performCheckin } from './checkin'
 import type { Account, AppSettings } from './types'
 
 let cronJob: cron.ScheduledTask | null = null
 let lastCronExpression: string = ''
+
+// ===== 同日限流重试 =====
+// TRAE 签到接口偶发服务端排队限流（code 9074"参与用户太多"），短间隔重试无效，
+// 但当天晚些时候重试通常可成功。每日 cron 只跑一次，撞上限流就会丢掉当天签到，
+// 因此这里维护一个当天内的低频重试循环，直到成功或跨天。
+const TRANSIENT_RETRY_INTERVAL_MS = 10 * 60 * 1000
+let transientRetryTimer: NodeJS.Timeout | null = null
+const transientPendingIds = new Set<string>()
+let transientRetryDay = ''
 
 /**
  * 判断当前 cronJob 是否处于运行中
@@ -84,6 +93,7 @@ export function startScheduler() {
  * 停止定时任务
  */
 export function stopScheduler() {
+  stopTransientRetry()
   if (cronJob) {
     try {
       cronJob.stop()
@@ -103,6 +113,72 @@ export function stopScheduler() {
 export function restartScheduler() {
   console.log('[Scheduler] restartScheduler 被调用（settings 变更触发）')
   startScheduler()
+}
+
+function stopTransientRetry() {
+  if (transientRetryTimer) {
+    clearInterval(transientRetryTimer)
+    transientRetryTimer = null
+    console.log('[Scheduler][TransientRetry] 同日限流重试循环已停止')
+  }
+}
+
+function ensureTransientRetry() {
+  const settings: AppSettings = getSettings()
+  if (!settings.autoCheckin) {
+    stopTransientRetry()
+    return
+  }
+  if (transientRetryTimer) return
+
+  transientRetryDay = new Date().toISOString().slice(0, 10)
+  console.log(
+    `[Scheduler][TransientRetry] 启动同日限流重试: 账号 ${transientPendingIds.size} 个, ` +
+    `间隔 ${TRANSIENT_RETRY_INTERVAL_MS / 60000} 分钟, 截止当日 23:45`
+  )
+  transientRetryTimer = setInterval(() => {
+    void runTransientRetryPass()
+  }, TRANSIENT_RETRY_INTERVAL_MS)
+}
+
+async function runTransientRetryPass() {
+  const now = new Date()
+  const day = now.toISOString().slice(0, 10)
+  if (day !== transientRetryDay || (now.getHours() === 23 && now.getMinutes() >= 45)) {
+    console.log('[Scheduler][TransientRetry] 当日重试窗口结束，停止重试')
+    stopTransientRetry()
+    transientPendingIds.clear()
+    return
+  }
+
+  const settings: AppSettings = getSettings()
+  if (!settings.autoCheckin) {
+    stopTransientRetry()
+    return
+  }
+
+  const accounts = getAccounts().filter((a: Account) => transientPendingIds.has(a.id) && a.enabled)
+  if (accounts.length === 0) {
+    stopTransientRetry()
+    transientPendingIds.clear()
+    return
+  }
+
+  console.log(`[Scheduler][TransientRetry] 重试 ${accounts.length} 个限流账号`)
+  try {
+    const results = await performAllCheckin(accounts as Account[])
+    for (const r of results) {
+      if ((r.result as any)?.transient && !r.result.success) continue
+      // 成功或确定性失败都不再重试
+      transientPendingIds.delete(r.account.id)
+    }
+    if (transientPendingIds.size === 0) {
+      console.log('[Scheduler][TransientRetry] 全部账号已处理完毕，停止重试')
+      stopTransientRetry()
+    }
+  } catch (e) {
+    console.error('[Scheduler][TransientRetry] 重试执行异常:', e)
+  }
 }
 
 /**
@@ -145,6 +221,21 @@ async function runAutoCheckin() {
         (r.result.points ? ` (+${r.result.points}分)` : '')
       )
     })
+
+    // 同日限流重试：把命中服务端限流的账号加入当天低频重试队列，
+    // 已成功或确定性失败的账号移出队列
+    const transientIds = results.filter(r => (r.result as any)?.transient && !r.result.success).map(r => r.account.id)
+    for (const r of results) {
+      if (!((r.result as any)?.transient && !r.result.success)) {
+        transientPendingIds.delete(r.account.id)
+      }
+    }
+    for (const id of transientIds) transientPendingIds.add(id)
+    if (transientPendingIds.size > 0) {
+      ensureTransientRetry()
+    } else if (transientRetryTimer) {
+      stopTransientRetry()
+    }
 
     // 发送通知
     if (settings.notifyOnSuccess && successCount > 0) {
